@@ -94,6 +94,103 @@ void init_king_attacks() {
 }
 
 // ---------------------------------------------------------------------------
+//  Slider Blocker Masks
+// ---------------------------------------------------------------------------
+Bitboard mask_bishop_attacks(Square sq) {
+    Bitboard mask = { 0 };
+    const int f = static_cast<int>(sq) % 8;
+    const int r = static_cast<int>(sq) / 8;
+
+    // Iterate all 4 diagonal directions
+    for (int dir = -1; dir <= 1; dir += 2) {
+        for (int d = -1; d <= 1; d += 2) {
+            for (int step = 1; step < 8; ++step) {
+                const int nf = f + dir * step;
+                const int nr = r + d * step;
+                if (nf < 0 || nf > 7 || nr < 0 || nr > 7) break;
+                // Skip the outermost square in each direction (edge can't block)
+                if (nf == 0 || nf == 7 || nr == 0 || nr == 7) break;
+                mask.bb |= 1ULL << (nr * 8 + nf);
+            }
+        }
+    }
+
+    return mask;
+}
+
+Bitboard mask_rook_attacks(Square sq) {
+    Bitboard mask = { 0 };
+    const int f = static_cast<int>(sq) % 8;
+    const int r = static_cast<int>(sq) / 8;
+
+    // Iterate all 4 orthogonal directions
+    constexpr int DirF[4] = { 0, 0, -1, 1 };
+    constexpr int DirR[4] = { -1, 1, 0, 0 };
+
+    for (int i = 0; i < 4; ++i) {
+        for (int step = 1; step < 8; ++step) {
+            const int nf = f + DirF[i] * step;
+            const int nr = r + DirR[i] * step;
+            if (nf < 0 || nf > 7 || nr < 0 || nr > 7) break;
+            // Skip the outermost square in each direction (edge can't block)
+            if (nf == 0 || nf == 7 || nr == 0 || nr == 7) break;
+            mask.bb |= 1ULL << (nr * 8 + nf);
+        }
+    }
+
+    return mask;
+}
+
+// ---------------------------------------------------------------------------
+//  On-The-Fly Slider Attack Generation (Raycasting)
+// ---------------------------------------------------------------------------
+Bitboard bishop_attacks_on_the_fly(Square sq, Bitboard block) {
+    Bitboard attacks = { 0 };
+    const int f = static_cast<int>(sq) % 8;
+    const int r = static_cast<int>(sq) / 8;
+
+    // 4 diagonal directions
+    constexpr int DirF[4] = { -1, 1, 1, -1 };
+    constexpr int DirR[4] = { -1, -1, 1, 1 };
+
+    for (int i = 0; i < 4; ++i) {
+        for (int step = 1; step < 8; ++step) {
+            const int nf = f + DirF[i] * step;
+            const int nr = r + DirR[i] * step;
+            if (nf < 0 || nf > 7 || nr < 0 || nr > 7) break;
+            const Bitboard target = { 1ULL << (nr * 8 + nf) };
+            attacks.bb |= target.bb;
+            if (block.bb & target.bb) break;
+        }
+    }
+
+    return attacks;
+}
+
+Bitboard rook_attacks_on_the_fly(Square sq, Bitboard block) {
+    Bitboard attacks = { 0 };
+    const int f = static_cast<int>(sq) % 8;
+    const int r = static_cast<int>(sq) / 8;
+
+    // 4 orthogonal directions
+    constexpr int DirF[4] = { 0, 0, -1, 1 };
+    constexpr int DirR[4] = { -1, 1, 0, 0 };
+
+    for (int i = 0; i < 4; ++i) {
+        for (int step = 1; step < 8; ++step) {
+            const int nf = f + DirF[i] * step;
+            const int nr = r + DirR[i] * step;
+            if (nf < 0 || nf > 7 || nr < 0 || nr > 7) break;
+            const Bitboard target = { 1ULL << (nr * 8 + nf) };
+            attacks.bb |= target.bb;
+            if (block.bb & target.bb) break;
+        }
+    }
+
+    return attacks;
+}
+
+// ---------------------------------------------------------------------------
 //  Public Initialization Entry Point
 // ---------------------------------------------------------------------------
 void init_attacks() {

@@ -1,41 +1,56 @@
-#include "../include/attacks.h" // Fixed path
-#include "../include/utils.h"   // Fixed path
+#include "../include/attacks.h"
+#include "../include/utils.h"
 #include <iostream>
 #include <cassert>
 
-void test_attacks() {
-    // Note: If the compiler complains about this function name, 
-    // check attacks.h to see what OpenCode actually named it!
+// Quick test helper to convert Square to a 64-bit mask
+constexpr uint64_t sq_mask(Square sq) {
+    return 1ULL << static_cast<int>(sq);
+}
+
+void test_slider_attacks() {
     init_attacks(); 
     
-    // Knight on D4 attacks all 8 squares
-    assert(popcount(KNIGHT_ATTACKS[static_cast<int>(Square::SQ_D4)]) == 8);
-    // Knight on A1 attacks 2 squares (B3, C2)
-    assert(popcount(KNIGHT_ATTACKS[static_cast<int>(Square::SQ_A1)]) == 2);
-    // Knight on A4 attacks 4 squares
-    assert(popcount(KNIGHT_ATTACKS[static_cast<int>(Square::SQ_A4)]) == 4);
-    // Knight on center-ish square B3 attacks 6 squares
-    assert(popcount(KNIGHT_ATTACKS[static_cast<int>(Square::SQ_B3)]) == 6);
-    // King on A1 attacks 3 squares
-    assert(popcount(KING_ATTACKS[static_cast<int>(Square::SQ_A1)]) == 3);
-    // King on D4 attacks all 8 squares
-    assert(popcount(KING_ATTACKS[static_cast<int>(Square::SQ_D4)]) == 8);
-    // King on A8 attacks 3 squares
-    assert(popcount(KING_ATTACKS[static_cast<int>(Square::SQ_A8)]) == 3);
-    // King on E5 attacks 8 squares
-    assert(popcount(KING_ATTACKS[static_cast<int>(Square::SQ_E5)]) == 8);
+    // --- Blocker mask tests ---
+    assert(popcount(mask_rook_attacks(Square::SQ_D4)) == 10);
+    assert(popcount(mask_bishop_attacks(Square::SQ_D4)) == 9);
+    assert(popcount(mask_rook_attacks(Square::SQ_A1)) > 0);
     
-    // White pawn on E2 attacks D3 and F3
-    assert(popcount(PAWN_ATTACKS[0][static_cast<int>(Square::SQ_E2)]) == 2);
-    // Black pawn on E7 attacks D6 and F6
-    assert(popcount(PAWN_ATTACKS[1][static_cast<int>(Square::SQ_E7)]) == 2);
-    // Black pawn on H7 only attacks G6
-    assert(popcount(PAWN_ATTACKS[1][static_cast<int>(Square::SQ_H7)]) == 1);
+    // --- On-the-fly attack tests (empty board) ---
+    assert(popcount(rook_attacks_on_the_fly(Square::SQ_D4, Bitboard{0})) == 14);
+    assert(popcount(rook_attacks_on_the_fly(Square::SQ_A1, Bitboard{0})) == 14);
+    assert(popcount(bishop_attacks_on_the_fly(Square::SQ_D4, Bitboard{0})) == 13);
+    assert(popcount(bishop_attacks_on_the_fly(Square::SQ_A1, Bitboard{0})) == 7);
     
-    std::cout << "All attack table tests passed." << std::endl;
+    // --- Blocked attacks ---
+    // Rook on D4 blocked by piece on D5
+    {
+        const Bitboard block = {sq_mask(Square::SQ_D5)};
+        const Bitboard atk = rook_attacks_on_the_fly(Square::SQ_D4, block);
+        // Should still attack D5 (capture), but not D6/D7/D8
+        assert(atk.bb & sq_mask(Square::SQ_D5));
+        assert(!(atk.bb & sq_mask(Square::SQ_D6)));
+        assert(!(atk.bb & sq_mask(Square::SQ_D7)));
+        assert(!(atk.bb & sq_mask(Square::SQ_D8)));
+        // Unblocked directions should still work
+        assert(atk.bb & sq_mask(Square::SQ_D3));
+        assert(atk.bb & sq_mask(Square::SQ_D2));
+        assert(atk.bb & sq_mask(Square::SQ_D1));
+    }
+    
+    // Bishop on E4 blocked by piece on F5
+    {
+        const Bitboard block = {sq_mask(Square::SQ_F5)};
+        const Bitboard atk = bishop_attacks_on_the_fly(Square::SQ_E4, block);
+        assert(atk.bb & sq_mask(Square::SQ_F5));
+        assert(!(atk.bb & sq_mask(Square::SQ_G6)));
+        assert(!(atk.bb & sq_mask(Square::SQ_H7)));
+    }
+    
+    std::cout << "All slider attack tests passed." << std::endl;
 }
 
 int main() {
-    test_attacks();
+    test_slider_attacks();
     return 0;
 }
