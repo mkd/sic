@@ -1,60 +1,42 @@
-#include "../include/geometry.h" // Make sure the path is correct
+#include "../include/piece.h"
 #include <iostream>
 #include <cassert>
 
-void test_geometry() {
-    // file_of / rank_of
-    assert(file_of(Square::SQ_A1) == File::FILE_A);
-    assert(rank_of(Square::SQ_A1) == Rank::RANK_1);
-    assert(file_of(Square::SQ_H8) == File::FILE_H);
-    assert(rank_of(Square::SQ_H8) == Rank::RANK_8);
-    assert(file_of(Square::SQ_D4) == File::FILE_D);
-    assert(rank_of(Square::SQ_D4) == Rank::RANK_4);
+void test_piece() {
+    // make_piece / piece_type / color_of roundtrip
+    assert(piece_type(make_piece(Color::WHITE, PieceType::KNIGHT)) == PieceType::KNIGHT);
+    assert(color_of(make_piece(Color::BLACK, PieceType::ROOK)) == Color::BLACK);
+    assert(make_piece(Color::WHITE, PieceType::QUEEN) == Piece::WHITE_QUEEN);
+    assert(make_piece(Color::BLACK, PieceType::PAWN) == Piece::BLACK_PAWN);
     
-    // make_square
-    assert(make_square(File::FILE_A, Rank::RANK_1) == Square::SQ_A1);
-    assert(make_square(File::FILE_H, Rank::RANK_8) == Square::SQ_H8);
-    assert(make_square(File::FILE_D, Rank::RANK_4) == Square::SQ_D4);
+    // Color flip
+    assert(~Color::WHITE == Color::BLACK);
+    assert(~Color::BLACK == Color::WHITE);
     
-    // flip_vertical
-    assert(flip_vertical(Square::SQ_A1) == Square::SQ_A8);
-    assert(flip_vertical(Square::SQ_H8) == Square::SQ_H1);
-    assert(flip_vertical(flip_vertical(Square::SQ_E4)) == Square::SQ_E4);
+    // Predicates
+    assert(is_white_piece(Piece::WHITE_KNIGHT));
+    assert(is_black_piece(Piece::BLACK_ROOK));
+    assert(type_is_slider(PieceType::BISHOP));
+    assert(type_is_slider(PieceType::ROOK));
+    assert(type_is_slider(PieceType::QUEEN));
+    assert(!type_is_slider(PieceType::KNIGHT));
+    assert(!type_is_slider(PieceType::PAWN));
+    assert(!type_is_slider(PieceType::KING));
     
-    // relative_square
-    assert(relative_square(Color::WHITE, Square::SQ_A1) == Square::SQ_A1);
-    assert(relative_square(Color::BLACK, Square::SQ_A1) == Square::SQ_A8);
-    assert(relative_square(Color::BLACK, Square::SQ_E4) == Square::SQ_E5);
+    // piece_to_char / char_to_piece roundtrip
+    assert(piece_to_char(char_to_piece('R')) == 'R');
+    assert(piece_to_char(char_to_piece('q')) == 'q');
+    assert(piece_to_char(char_to_piece('K')) == 'K');
+    assert(piece_to_char(char_to_piece('p')) == 'p');
+    assert(char_to_piece('X') == Piece::PIECE_NONE);
     
-    // sq_distance (Chebyshev)
-    assert(sq_distance(Square::SQ_A1, Square::SQ_A1) == 0);
-    assert(sq_distance(Square::SQ_A1, Square::SQ_H8) == 7);
-    assert(sq_distance(Square::SQ_A1, Square::SQ_C3) == 2);
-    assert(sq_distance(Square::SQ_D4, Square::SQ_E6) == 2);
+    // PIECE_NONE
+    assert(piece_to_char(Piece::PIECE_NONE) == ' ');
     
-    // same_color (diagonal check) - FIXED THE B2 BUG HERE
-    assert(same_color(Square::SQ_A1, Square::SQ_C3));
-    assert(!same_color(Square::SQ_A1, Square::SQ_B1)); 
-    
-    // on_same_diagonal
-    assert(on_same_diagonal(Square::SQ_A1, Square::SQ_H8));
-    assert(on_same_diagonal(Square::SQ_A1, Square::SQ_C3));
-    assert(!on_same_diagonal(Square::SQ_A1, Square::SQ_B1));
-    
-    // on_same_anti_diagonal
-    assert(on_same_anti_diagonal(Square::SQ_A8, Square::SQ_H1));
-    assert(on_same_anti_diagonal(Square::SQ_A3, Square::SQ_C1));
-    assert(!on_same_anti_diagonal(Square::SQ_A1, Square::SQ_B1));
-    
-    // is_valid_square
-    assert(is_valid_square(Square::SQ_A1));
-    assert(is_valid_square(Square::SQ_H8));
-    assert(!is_valid_square(Square::SQ_NONE));
-    
-    std::cout << "All geometry tests passed." << std::endl;
+    std::cout << "All piece tests passed." << std::endl;
 }
 
 int main() {
-    test_geometry();
+    test_piece(); // Make sure this says test_piece!
     return 0;
 }
