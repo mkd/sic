@@ -1,0 +1,53 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        compiler: [gcc, clang]
+        include:
+          - compiler: gcc
+            cxx: g++
+          - compiler: clang
+            cxx: clang++
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install GCC (Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc'
+        run: sudo apt-get update && sudo apt-get install -y gcc g++
+
+      - name: Install Clang (Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang'
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Install Clang (macOS)
+        if: matrix.os == 'macos-latest' && matrix.compiler == 'clang'
+        run: brew install llvm || true
+
+      - name: Set compiler variable
+        run: echo "CXX_BIN=${{ matrix.cxx }}" >> $GITHUB_ENV
+
+      - name: Release build
+        run: make CXX=${{ matrix.cxx }} build
+
+      - name: Run binary (smoke test)
+        run: ./sic uci && ./sic isready
+        continue-on-error: true
+
+      - name: Clean workspace
+        run: make clean
+
+      - name: Debug build
+        run: make CXX=${{ matrix.cxx }} build DEBUG=1
