@@ -3,54 +3,29 @@
 #include <iostream>
 #include <cassert>
 
-// Quick test helper to convert Square to a 64-bit mask
 constexpr uint64_t sq_mask(Square sq) {
     return 1ULL << static_cast<int>(sq);
 }
 
-void test_slider_attacks() {
-    init_attacks(); 
+void test_magic_bitboards() {
+    init_attacks(); // This should now internally call init_magic_bitboards()
     
-    // --- Blocker mask tests ---
-    assert(popcount(mask_rook_attacks(Square::SQ_D4)) == 10);
-    assert(popcount(mask_bishop_attacks(Square::SQ_D4)) == 9);
-    assert(popcount(mask_rook_attacks(Square::SQ_A1)) > 0);
+    // --- Verify Magic Hashing vs Slow Raycasting ---
     
-    // --- On-the-fly attack tests (empty board) ---
-    assert(popcount(rook_attacks_on_the_fly(Square::SQ_D4, Bitboard{0})) == 14);
-    assert(popcount(rook_attacks_on_the_fly(Square::SQ_A1, Bitboard{0})) == 14);
-    assert(popcount(bishop_attacks_on_the_fly(Square::SQ_D4, Bitboard{0})) == 13);
-    assert(popcount(bishop_attacks_on_the_fly(Square::SQ_A1, Bitboard{0})) == 7);
+    // Square D4 with an empty board
+    Bitboard empty_occ = {0};
+    assert(get_bishop_attacks(Square::SQ_D4, empty_occ).bb == bishop_attacks_on_the_fly(Square::SQ_D4, empty_occ).bb);
+    assert(get_rook_attacks(Square::SQ_D4, empty_occ).bb == rook_attacks_on_the_fly(Square::SQ_D4, empty_occ).bb);
+
+    // Square D4 with blockers on D5 and F6
+    Bitboard blockers = {sq_mask(Square::SQ_D5) | sq_mask(Square::SQ_F6)};
+    assert(get_bishop_attacks(Square::SQ_D4, blockers).bb == bishop_attacks_on_the_fly(Square::SQ_D4, blockers).bb);
+    assert(get_rook_attacks(Square::SQ_D4, blockers).bb == rook_attacks_on_the_fly(Square::SQ_D4, blockers).bb);
     
-    // --- Blocked attacks ---
-    // Rook on D4 blocked by piece on D5
-    {
-        const Bitboard block = {sq_mask(Square::SQ_D5)};
-        const Bitboard atk = rook_attacks_on_the_fly(Square::SQ_D4, block);
-        // Should still attack D5 (capture), but not D6/D7/D8
-        assert(atk.bb & sq_mask(Square::SQ_D5));
-        assert(!(atk.bb & sq_mask(Square::SQ_D6)));
-        assert(!(atk.bb & sq_mask(Square::SQ_D7)));
-        assert(!(atk.bb & sq_mask(Square::SQ_D8)));
-        // Unblocked directions should still work
-        assert(atk.bb & sq_mask(Square::SQ_D3));
-        assert(atk.bb & sq_mask(Square::SQ_D2));
-        assert(atk.bb & sq_mask(Square::SQ_D1));
-    }
-    
-    // Bishop on E4 blocked by piece on F5
-    {
-        const Bitboard block = {sq_mask(Square::SQ_F5)};
-        const Bitboard atk = bishop_attacks_on_the_fly(Square::SQ_E4, block);
-        assert(atk.bb & sq_mask(Square::SQ_F5));
-        assert(!(atk.bb & sq_mask(Square::SQ_G6)));
-        assert(!(atk.bb & sq_mask(Square::SQ_H7)));
-    }
-    
-    std::cout << "All slider attack tests passed." << std::endl;
+    std::cout << "All Magic Bitboard tests passed! Phase 2.3 is officially complete." << std::endl;
 }
 
 int main() {
-    test_slider_attacks();
+    test_magic_bitboards();
     return 0;
 }

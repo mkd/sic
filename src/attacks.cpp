@@ -9,6 +9,14 @@ Bitboard KNIGHT_ATTACKS[64];
 Bitboard KING_ATTACKS[64];
 
 // ---------------------------------------------------------------------------
+//  Magic Bitboard Tables & Masks
+// ---------------------------------------------------------------------------
+Bitboard BISHOP_MASKS[64];
+Bitboard ROOK_MASKS[64];
+Bitboard BISHOP_ATTACKS_TABLE[64][512];
+Bitboard ROOK_ATTACKS_TABLE[64][4096];
+
+// ---------------------------------------------------------------------------
 //  File Masks (prevent wrap-around on left/right shifts)
 // ---------------------------------------------------------------------------
 constexpr Bitboard FILE_A_MASK = { 0x0101010101010101ULL };
@@ -191,10 +199,50 @@ Bitboard rook_attacks_on_the_fly(Square sq, Bitboard block) {
 }
 
 // ---------------------------------------------------------------------------
+//  Magic Bitboard Initialization (Carry-Rippler)
+// ---------------------------------------------------------------------------
+void init_magic_bitboards() {
+    for (int sq = 0; sq < 64; ++sq) {
+        // Precompute and cache blocker masks for fast lookups
+        BISHOP_MASKS[sq] = mask_bishop_attacks(static_cast<Square>(sq));
+        ROOK_MASKS[sq] = mask_rook_attacks(static_cast<Square>(sq));
+
+        // --- Bishop table: carry-ripler over relevant squares ---
+        {
+            Bitboard mask = BISHOP_MASKS[sq];
+            uint64_t magic = BISHOP_MAGICS[sq].bb;
+            int shift = 64 - BISHOP_RELEVANT_BITS[sq];
+
+            for (uint64_t b = 0; ; ) {
+                uint64_t key = (b & mask.bb) * magic >> shift;
+                BISHOP_ATTACKS_TABLE[sq][key] = bishop_attacks_on_the_fly(static_cast<Square>(sq), { b & mask.bb });
+                if (b == 0) break;
+                b = (b - mask.bb) & mask.bb;
+            }
+        }
+
+        // --- Rook table: carry-ripler over relevant squares ---
+        {
+            Bitboard mask = ROOK_MASKS[sq];
+            uint64_t magic = ROOK_MAGICS[sq].bb;
+            int shift = 64 - ROOK_RELEVANT_BITS[sq];
+
+            for (uint64_t b = 0; ; ) {
+                uint64_t key = (b & mask.bb) * magic >> shift;
+                ROOK_ATTACKS_TABLE[sq][key] = rook_attacks_on_the_fly(static_cast<Square>(sq), { b & mask.bb });
+                if (b == 0) break;
+                b = (b - mask.bb) & mask.bb;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 //  Public Initialization Entry Point
 // ---------------------------------------------------------------------------
 void init_attacks() {
     init_pawn_attacks();
     init_knight_attacks();
     init_king_attacks();
+    init_magic_bitboards();
 }
