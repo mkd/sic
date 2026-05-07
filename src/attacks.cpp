@@ -1,5 +1,5 @@
-#include "attacks.h"
-#include "utils.h"
+#include "../include/attacks.h"
+#include "../include/utils.h"
 
 // ---------------------------------------------------------------------------
 //  Attack Table Storage
@@ -36,7 +36,7 @@ void init_pawn_attacks() {
     for (int sq = 0; sq < 64; ++sq) {
         const Bitboard b = sq_bb(static_cast<Square>(sq));
 
-        // White pawns attack "up" the board$a
+        // White pawns attack "up" the board
         PAWN_ATTACKS[0][sq] = { ((b.bb << 7) & ~FILE_A_MASK.bb) | ((b.bb << 9) & ~FILE_H_MASK.bb) };
 
         // Black pawns attack "down" the board
@@ -49,7 +49,6 @@ void init_pawn_attacks() {
 // ---------------------------------------------------------------------------
 void init_knight_attacks() {
     for (int sq = 0; sq < 64; ++sq) {
-        const Bitboard b = sq_bb(static_cast<Square>(sq));
         Bitboard attacks = { 0 };
 
         // Knight offsets: all 8 L-shape moves
@@ -58,9 +57,6 @@ void init_knight_attacks() {
         for (int i = 0; i < 8; ++i) {
             const int target = sq + Offsets[i];
             if (target >= 0 && target < 64) {
-                // Verify the move doesn't wrap around the board
-                // A knight move changes file by 1 or 2. If source and target
-                // file distance exceeds 2, the move wrapped.
                 const int src_file = sq % 8;
                 const int tgt_file = target % 8;
                 const int file_diff = (src_file > tgt_file) ? (src_file - tgt_file) : (tgt_file - src_file);
@@ -69,7 +65,6 @@ void init_knight_attacks() {
                 }
             }
         }
-
         KNIGHT_ATTACKS[sq] = attacks;
     }
 }
@@ -79,7 +74,6 @@ void init_knight_attacks() {
 // ---------------------------------------------------------------------------
 void init_king_attacks() {
     for (int sq = 0; sq < 64; ++sq) {
-        const Bitboard b = sq_bb(static_cast<Square>(sq));
         Bitboard attacks = { 0 };
 
         // King offsets: all 8 surrounding squares
@@ -96,7 +90,6 @@ void init_king_attacks() {
                 }
             }
         }
-
         KING_ATTACKS[sq] = attacks;
     }
 }
@@ -109,7 +102,6 @@ Bitboard mask_bishop_attacks(Square sq) {
     const int f = static_cast<int>(sq) % 8;
     const int r = static_cast<int>(sq) / 8;
 
-    // Iterate all 4 diagonal directions
     for (int dir = -1; dir <= 1; dir += 2) {
         for (int d = -1; d <= 1; d += 2) {
             for (int step = 1; step < 8; ++step) {
@@ -122,7 +114,6 @@ Bitboard mask_bishop_attacks(Square sq) {
             }
         }
     }
-
     return mask;
 }
 
@@ -131,7 +122,6 @@ Bitboard mask_rook_attacks(Square sq) {
     const int f = static_cast<int>(sq) % 8;
     const int r = static_cast<int>(sq) / 8;
 
-    // Iterate all 4 orthogonal directions
     constexpr int DirF[4] = { 0, 0, -1, 1 };
     constexpr int DirR[4] = { -1, 1, 0, 0 };
 
@@ -145,7 +135,6 @@ Bitboard mask_rook_attacks(Square sq) {
             mask.bb |= 1ULL << (nr * 8 + nf);
         }
     }
-
     return mask;
 }
 
@@ -157,7 +146,6 @@ Bitboard bishop_attacks_on_the_fly(Square sq, Bitboard block) {
     const int f = static_cast<int>(sq) % 8;
     const int r = static_cast<int>(sq) / 8;
 
-    // 4 diagonal directions
     constexpr int DirF[4] = { -1, 1, 1, -1 };
     constexpr int DirR[4] = { -1, -1, 1, 1 };
 
@@ -171,7 +159,6 @@ Bitboard bishop_attacks_on_the_fly(Square sq, Bitboard block) {
             if (block.bb & target.bb) break;
         }
     }
-
     return attacks;
 }
 
@@ -180,7 +167,6 @@ Bitboard rook_attacks_on_the_fly(Square sq, Bitboard block) {
     const int f = static_cast<int>(sq) % 8;
     const int r = static_cast<int>(sq) / 8;
 
-    // 4 orthogonal directions
     constexpr int DirF[4] = { 0, 0, -1, 1 };
     constexpr int DirR[4] = { -1, 1, 0, 0 };
 
@@ -194,7 +180,6 @@ Bitboard rook_attacks_on_the_fly(Square sq, Bitboard block) {
             if (block.bb & target.bb) break;
         }
     }
-
     return attacks;
 }
 
@@ -203,37 +188,30 @@ Bitboard rook_attacks_on_the_fly(Square sq, Bitboard block) {
 // ---------------------------------------------------------------------------
 void init_magic_bitboards() {
     for (int sq = 0; sq < 64; ++sq) {
-        // Precompute and cache blocker masks for fast lookups
         BISHOP_MASKS[sq] = mask_bishop_attacks(static_cast<Square>(sq));
         ROOK_MASKS[sq] = mask_rook_attacks(static_cast<Square>(sq));
 
-        // --- Bishop table: carry-ripler over relevant squares ---
-        {
-            Bitboard mask = BISHOP_MASKS[sq];
-            uint64_t magic = BISHOP_MAGICS[sq].bb;
-            int shift = 64 - BISHOP_RELEVANT_BITS[sq];
+        // --- Bishop table ---
+        Bitboard b_mask = BISHOP_MASKS[sq];
+        int b_shift = 64 - BISHOP_RELEVANT_BITS[sq];
+        uint64_t b_magic = BISHOP_MAGICS[sq].bb;
+        uint64_t b_occ = 0;
+        do {
+            uint64_t key = (b_occ * b_magic) >> b_shift;
+            BISHOP_ATTACKS_TABLE[sq][key] = bishop_attacks_on_the_fly(static_cast<Square>(sq), {b_occ});
+            b_occ = (b_occ - b_mask.bb) & b_mask.bb;
+        } while (b_occ != 0);
 
-            for (uint64_t b = 0; ; ) {
-                uint64_t key = (b & mask.bb) * magic >> shift;
-                BISHOP_ATTACKS_TABLE[sq][key] = bishop_attacks_on_the_fly(static_cast<Square>(sq), { b & mask.bb });
-                if (b == 0) break;
-                b = (b - mask.bb) & mask.bb;
-            }
-        }
-
-        // --- Rook table: carry-ripler over relevant squares ---
-        {
-            Bitboard mask = ROOK_MASKS[sq];
-            uint64_t magic = ROOK_MAGICS[sq].bb;
-            int shift = 64 - ROOK_RELEVANT_BITS[sq];
-
-            for (uint64_t b = 0; ; ) {
-                uint64_t key = (b & mask.bb) * magic >> shift;
-                ROOK_ATTACKS_TABLE[sq][key] = rook_attacks_on_the_fly(static_cast<Square>(sq), { b & mask.bb });
-                if (b == 0) break;
-                b = (b - mask.bb) & mask.bb;
-            }
-        }
+        // --- Rook table ---
+        Bitboard r_mask = ROOK_MASKS[sq];
+        int r_shift = 64 - ROOK_RELEVANT_BITS[sq];
+        uint64_t r_magic = ROOK_MAGICS[sq].bb;
+        uint64_t r_occ = 0;
+        do {
+            uint64_t key = (r_occ * r_magic) >> r_shift;
+            ROOK_ATTACKS_TABLE[sq][key] = rook_attacks_on_the_fly(static_cast<Square>(sq), {r_occ});
+            r_occ = (r_occ - r_mask.bb) & r_mask.bb;
+        } while (r_occ != 0);
     }
 }
 
