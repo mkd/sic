@@ -1,5 +1,7 @@
+#include "../include/attacks.h"
 #include "../include/position.h"
 #include "../include/move.h"
+#include "../include/movegen.h"
 #include "../include/utils.h"
 #include <iostream>
 #include <cassert>
@@ -35,21 +37,18 @@ void test_position() {
 }
 
 void test_move_encoding() {
-    // --- Castling: E1 -> G1, flag=Castling ---
     Move castle = make_move(Square::SQ_E1, Square::SQ_G1, MOVE_FLAG_CASTLING);
     assert(move_from(castle) == Square::SQ_E1);
     assert(move_to(castle) == Square::SQ_G1);
     assert(move_flag(castle) == MOVE_FLAG_CASTLING);
     assert(move_prom(castle) == PieceType::NONE);
 
-    // --- Promotion: E7 -> E8, Queen ---
     Move promo = make_move(Square::SQ_E7, Square::SQ_E8, MOVE_FLAG_NORMAL, PieceType::QUEEN);
     assert(move_from(promo) == Square::SQ_E7);
     assert(move_to(promo) == Square::SQ_E8);
     assert(move_flag(promo) == MOVE_FLAG_NORMAL);
     assert(move_prom(promo) == PieceType::QUEEN);
 
-    // --- En passant: E5 -> D6 ---
     {
         Move ep = make_move(Square::SQ_E5, Square::SQ_D6, MOVE_FLAG_ENPASSANT);
         assert(move_from(ep) == Square::SQ_E5);
@@ -59,14 +58,12 @@ void test_move_encoding() {
         (void)ep;
     }
 
-    // --- Normal move: D2 -> D4 ---
     Move normal = make_move(Square::SQ_D2, Square::SQ_D4);
     assert(move_from(normal) == Square::SQ_D2);
     assert(move_to(normal) == Square::SQ_D4);
     assert(move_flag(normal) == MOVE_FLAG_NORMAL);
     assert(move_prom(normal) == PieceType::NONE);
 
-    // --- MoveList ---
     MoveList ml;
     ml.push(normal);
     ml.push(castle);
@@ -76,7 +73,6 @@ void test_move_encoding() {
     assert(ml[1] == castle);
     assert(ml[2] == promo);
 
-    // --- Ranged-for iteration ---
     int iterated = 0;
     for (Move m : ml) {
         (void)m;
@@ -84,15 +80,31 @@ void test_move_encoding() {
     }
     assert(iterated == 3);
 
-    // --- Clear ---
     ml.clear();
     assert(ml.size() == 0);
 
     std::cout << "All Move Encoding & MoveList tests passed! Phase 2.5 is complete." << std::endl;
 }
 
+void test_movegen() {
+    init_attacks();
+    init_zobrist();
+
+    Position pos;
+    pos.set_fen("8/8/3k4/8/3N4/8/3K4/8 w - - 0 1");
+
+    MoveList list;
+    MoveGen::generate_legal_moves(pos, list);
+
+    // Knight on D4 has 8 moves, King on D2 has 8 moves = 16 total
+    assert(list.size() == 16);
+
+    std::cout << "All MoveGen leaper tests passed! Phase 3.1 is complete." << std::endl;
+}
+
 int main() {
     test_position();
     test_move_encoding();
+    test_movegen();
     return 0;
 }
