@@ -1,75 +1,93 @@
 #include "../include/attacks.h"
+#include "../include/utils.h"
+#include <cstring>
 
-// ---------------------------------------------------------------------------
-//  Relevant Bits (Shift amounts) - Vertically Symmetrical
-// ---------------------------------------------------------------------------
 const int ROOK_RELEVANT_BITS[64] = {
-    12, 11, 11, 11, 11, 11, 11, 12, 11, 10, 10, 10, 10, 10, 10, 11, 
-    11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 
-    11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 
+    12, 11, 11, 11, 11, 11, 11, 12, 11, 10, 10, 10, 10, 10, 10, 11,
+    11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11,
+    11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11,
     11, 10, 10, 10, 10, 10, 10, 11, 12, 11, 11, 11, 11, 11, 11, 12
 };
 
 const int BISHOP_RELEVANT_BITS[64] = {
-    6, 5, 5, 5, 5, 5, 5, 6, 5, 5, 5, 5, 5, 5, 5, 5, 
-    5, 5, 7, 7, 7, 7, 5, 5, 5, 5, 7, 9, 9, 7, 5, 5, 
-    5, 5, 7, 9, 9, 7, 5, 5, 5, 5, 7, 7, 7, 7, 5, 5, 
+    6, 5, 5, 5, 5, 5, 5, 6, 5, 5, 5, 5, 5, 5, 5, 5,
+    5, 5, 7, 7, 7, 7, 5, 5, 5, 5, 7, 9, 9, 7, 5, 5,
+    5, 5, 7, 9, 9, 7, 5, 5, 5, 5, 7, 7, 7, 7, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 6, 5, 5, 5, 5, 5, 5, 6
 };
 
-// ---------------------------------------------------------------------------
-//  Magic Numbers - Flipped from Gargantua (A8=0) to SIC (A1=0)
-// ---------------------------------------------------------------------------
-const Bitboard ROOK_MAGICS[64] = {
-    // Rank 1
-    {0x280001040802101ULL}, {0x2100190040002085ULL}, {0x80c0084100102001ULL}, {0x4024081001000421ULL},
-    {0x20030a0244872ULL}, {0x12001008414402ULL}, {0x2006104900a0804ULL}, {0x1004081002402ULL},
-    // Rank 2
-    {0x101002200408200ULL}, {0x40802000401080ULL}, {0x4008142004410100ULL}, {0x2060820c0120200ULL},
-    {0x1001004080100ULL}, {0x20c020080040080ULL}, {0x2935610830022400ULL}, {0x44440041009200ULL},
-    // Rank 3
-    {0x480400080088020ULL}, {0x1000422010034000ULL}, {0x30200100110040ULL}, {0x100021010009ULL},
-    {0x2002080100110004ULL}, {0x202008004008002ULL}, {0x20020004010100ULL}, {0x2048440040820001ULL},
-    // Rank 4
-    {0x4040008040800020ULL}, {0x440003000200801ULL}, {0x4200011004500ULL}, {0x188020010100100ULL},
-    {0x14800401802800ULL}, {0x2080040080800200ULL}, {0x124080204001001ULL}, {0x200046502000484ULL},
-    // Rank 5
-    {0x100400080208000ULL}, {0x2040002120081000ULL}, {0x21200680100081ULL}, {0x20100080080080ULL},
-    {0x2000a00200410ULL}, {0x20080800400ULL}, {0x80088400100102ULL}, {0x80004600042881ULL},
-    // Rank 6
-    {0x80044006422000ULL}, {0x100808020004000ULL}, {0x12108a0010204200ULL}, {0x140848010000802ULL},
-    {0x481828014002800ULL}, {0x8094004002004100ULL}, {0x4010040010010802ULL}, {0x20008806104ULL},
-    // Rank 7
-    {0x800098204000ULL}, {0x2024401000200040ULL}, {0x100802000801000ULL}, {0x120800800801000ULL},
-    {0x208808088000400ULL}, {0x2802200800400ULL}, {0x2200800100020080ULL}, {0x801000060821100ULL},
-    // Rank 8
-    {0x8a80104000800020ULL}, {0x140002000100040ULL}, {0x2801880a0017001ULL}, {0x100081001000420ULL},
-    {0x200020010080420ULL}, {0x3001c0002010008ULL}, {0x8480008002000100ULL}, {0x2080088004402900ULL}
-};
+Bitboard BISHOP_MAGICS[64];
+Bitboard ROOK_MAGICS[64];
 
-const Bitboard BISHOP_MAGICS[64] = {
-    // Rank 1
-    {0xa010109502200ULL}, {0x4a02012000ULL}, {0x500201010098b028ULL}, {0x8040002811040900ULL},
-    {0x28000010020204ULL}, {0x6000020202d0240ULL}, {0x8918844842082200ULL}, {0x4010011029020020ULL},
-    // Rank 2
-    {0x500861011240000ULL}, {0x180806108200800ULL}, {0x4000020e01040044ULL}, {0x300000261044000aULL},
-    {0x802241102020002ULL}, {0x20906061210001ULL}, {0x5a84841004010310ULL}, {0x4010801011c04ULL},
-    // Rank 3
-    {0x209188240001000ULL}, {0x400408a884001800ULL}, {0x110400a6080400ULL}, {0x1840060a44020800ULL},
-    {0x90080104000041ULL}, {0x201011000808101ULL}, {0x1a2208080504f080ULL}, {0x8012020600211212ULL},
-    // Rank 4
-    {0x8004200962a00220ULL}, {0x8422100208500202ULL}, {0x2000402200300c08ULL}, {0x8646020080080080ULL},
-    {0x80020a0200100808ULL}, {0x2010004880111000ULL}, {0x623000a080011400ULL}, {0x42008c0340209202ULL},
-    // Rank 5
-    {0x220200865090201ULL}, {0x2010100a02021202ULL}, {0x152048408022401ULL}, {0x20080002081110ULL},
-    {0x4001001021004000ULL}, {0x800040400a011002ULL}, {0xe4004081011002ULL}, {0x1c004001012080ULL},
-    // Rank 6
-    {0x400210c3880100ULL}, {0x404022024108200ULL}, {0x810018200204102ULL}, {0x4002801a02003ULL},
-    {0x85040820080400ULL}, {0x810102c808880400ULL}, {0xe900410884800ULL}, {0x8002020480840102ULL},
-    // Rank 7
-    {0x4050404440404ULL}, {0x21001420088ULL}, {0x24d0080801082102ULL}, {0x1020a0a020400ULL},
-    {0x40308200402ULL}, {0x4011002100800ULL}, {0x401484104104005ULL}, {0x801010402020200ULL},
-    // Rank 8
-    {0x40040844404084ULL}, {0x2004208a004208ULL}, {0x10190041080202ULL}, {0x108060845042010ULL},
-    {0x581104180800210ULL}, {0x2112080446200010ULL}, {0x1080820820060210ULL}, {0x3c0808410220200ULL}
-};
+// --- Fast Sparse Random Number Generator ---
+static uint64_t prng_state = 1804289383ULL;
+static uint64_t rand64() {
+    prng_state ^= prng_state >> 12;
+    prng_state ^= prng_state << 25;
+    prng_state ^= prng_state >> 27;
+    return prng_state * 2685821657736338717LL;
+}
+
+// Sparse randoms (fewer bits set) find magic numbers 1000x faster
+static uint64_t sparse_rand() {
+    return rand64() & rand64() & rand64();
+}
+
+void init_magics() {
+    static uint64_t used[4096];
+    static uint64_t b_blockers[512];
+    static uint64_t r_blockers[4096];
+    
+    for (int sq = 0; sq < 64; ++sq) {
+        BISHOP_MASKS[sq] = mask_bishop_attacks(static_cast<Square>(sq));
+        ROOK_MASKS[sq] = mask_rook_attacks(static_cast<Square>(sq));
+
+        // -- BISHOPS --
+        uint64_t b_mask = BISHOP_MASKS[sq].bb;
+        int b_configs = 1 << popcount({b_mask});
+        int b_shift = 64 - BISHOP_RELEVANT_BITS[sq];
+        
+        uint64_t b_occ = 0;
+        int b_idx = 0;
+        do {
+            b_blockers[b_idx++] = b_occ;
+            b_occ = (b_occ - b_mask) & b_mask;
+        } while (b_occ != 0);
+
+        while (true) {
+            uint64_t magic = sparse_rand();
+            std::memset(used, 0, sizeof(used));
+            bool success = true;
+            for (int i = 0; i < b_configs; ++i) {
+                uint64_t key = (b_blockers[i] * magic) >> b_shift;
+                if (used[key]) { success = false; break; }
+                used[key] = 1;
+            }
+            if (success) { BISHOP_MAGICS[sq].bb = magic; break; }
+        }
+
+        // -- ROOKS --
+        uint64_t r_mask = ROOK_MASKS[sq].bb;
+        int r_configs = 1 << popcount({r_mask});
+        int r_shift = 64 - ROOK_RELEVANT_BITS[sq];
+        
+        uint64_t r_occ = 0;
+        int r_idx = 0;
+        do {
+            r_blockers[r_idx++] = r_occ;
+            r_occ = (r_occ - r_mask) & r_mask;
+        } while (r_occ != 0);
+
+        while (true) {
+            uint64_t magic = sparse_rand();
+            std::memset(used, 0, sizeof(used));
+            bool success = true;
+            for (int i = 0; i < r_configs; ++i) {
+                uint64_t key = (r_blockers[i] * magic) >> r_shift;
+                if (used[key]) { success = false; break; }
+                used[key] = 1;
+            }
+            if (success) { ROOK_MAGICS[sq].bb = magic; break; }
+        }
+    }
+}
