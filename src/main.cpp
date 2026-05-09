@@ -45,12 +45,27 @@ void test_movegen() {
         pos.set_fen("8/8/8/3Q4/8/8/8/4K3 w - - 0 1");
         MoveList list;
         MoveGen::generate_legal_moves(pos, list);
-        // Queen on D4: 27 moves (14 orthogonal + 13 diagonal)
-        // King on E1: 5 moves
         assert(list.size() == 32);
     }
 
-    std::cout << "All MoveGen leaper & slider tests passed! Phase 3.2 is complete." << std::endl;
+    // --- Pawn test: White pawn on D7, promotion capture on C8 ---
+    {
+        Position pos;
+        pos.set_fen("rnbq1bnr/pp1Pp1pp/8/2p5/8/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 1");
+        MoveList list;
+        MoveGen::generate_legal_moves(pos, list);
+
+        int total_c8 = 0;
+        for (const auto& m : list) {
+            if (move_from(m) == Square::SQ_D7 && move_to(m) == Square::SQ_C8) {
+                total_c8++;
+            }
+        }
+        assert(total_c8 == 4);
+        std::cout << "Pawn promotion capture test passed! (D7->C8: " << total_c8 << " moves)" << std::endl;
+    }
+
+    std::cout << "All MoveGen leaper, slider & pawn tests passed! Phase 3.3 is complete." << std::endl;
 }
 
 int main() {
