@@ -65,7 +65,37 @@ void test_movegen() {
         std::cout << "Pawn promotion capture test passed! (D7->C8: " << total_c8 << " moves)" << std::endl;
     }
 
-    std::cout << "All MoveGen leaper, slider & pawn tests passed! Phase 3.3 is complete." << std::endl;
+    // --- En Passant test: White pawn on E5 captures d5 en passant ---
+    {
+        Position pos;
+        pos.set_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+        MoveList list;
+        MoveGen::generate_legal_moves(pos, list);
+
+        int ep_count = 0;
+        for (const auto& m : list) {
+            if (move_flag(m) == MOVE_FLAG_ENPASSANT) ep_count++;
+        }
+        assert(ep_count == 1);
+        std::cout << "En Passant test passed! (EP moves: " << ep_count << ")" << std::endl;
+    }
+
+    // --- Castling test: Kiwipete position (both sides can castle) ---
+    {
+        Position pos;
+        pos.set_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+        MoveList list;
+        MoveGen::generate_legal_moves(pos, list);
+
+        int castle_count = 0;
+        for (const auto& m : list) {
+            if (move_flag(m) == MOVE_FLAG_CASTLING) castle_count++;
+        }
+        assert(castle_count >= 2);
+        std::cout << "Castling test passed! (Castling moves: " << castle_count << ")" << std::endl;
+    }
+
+    std::cout << "All MoveGen tests passed! Phase 3.4 is complete." << std::endl;
 }
 
 int main() {

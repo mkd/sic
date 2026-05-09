@@ -154,6 +154,43 @@ void generate_pawn_moves(const Position& pos, MoveList& list) {
             list.push(make_move(sq, to, MOVE_FLAG_NORMAL, PieceType::KNIGHT));
         }
     }
+
+    // --- En Passant ---
+    if (pos.epSquare != Square::SQ_NONE) {
+        Bitboard ep_attackers = {PAWN_ATTACKS[static_cast<int>(~Us)][static_cast<int>(pos.epSquare)].bb & pawns.bb};
+        while (ep_attackers.bb) {
+            const Square sq = pop_lsb(ep_attackers);
+            list.push(make_move(sq, pos.epSquare, MOVE_FLAG_ENPASSANT));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  Castling Move Generation (Pseudo-legal: no attack checks)
+// ---------------------------------------------------------------------------
+template <Color Us>
+void generate_castling_moves(const Position& pos, MoveList& list) {
+    const Bitboard empty = pos.empty_squares();
+
+    if (Us == Color::WHITE) {
+        constexpr Bitboard OO_MASK = {(1ULL << 5) | (1ULL << 6)};
+        constexpr Bitboard OOO_MASK = {(1ULL << 1) | (1ULL << 2) | (1ULL << 3)};
+
+        if ((pos.castlingRights & WHITE_OO) && (empty.bb & OO_MASK.bb) == OO_MASK.bb)
+            list.push(make_move(Square::SQ_E1, Square::SQ_G1, MOVE_FLAG_CASTLING));
+
+        if ((pos.castlingRights & WHITE_OOO) && (empty.bb & OOO_MASK.bb) == OOO_MASK.bb)
+            list.push(make_move(Square::SQ_E1, Square::SQ_C1, MOVE_FLAG_CASTLING));
+    } else {
+        constexpr Bitboard OO_MASK = {(1ULL << 61) | (1ULL << 62)};
+        constexpr Bitboard OOO_MASK = {(1ULL << 57) | (1ULL << 58) | (1ULL << 59)};
+
+        if ((pos.castlingRights & BLACK_OO) && (empty.bb & OO_MASK.bb) == OO_MASK.bb)
+            list.push(make_move(Square::SQ_E8, Square::SQ_G8, MOVE_FLAG_CASTLING));
+
+        if ((pos.castlingRights & BLACK_OOO) && (empty.bb & OOO_MASK.bb) == OOO_MASK.bb)
+            list.push(make_move(Square::SQ_E8, Square::SQ_C8, MOVE_FLAG_CASTLING));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,10 +203,12 @@ void generate_legal_moves(const Position& pos, MoveList& list) {
         generate_leaper_moves<Color::WHITE>(pos, list);
         generate_slider_moves<Color::WHITE>(pos, list);
         generate_pawn_moves<Color::WHITE>(pos, list);
+        generate_castling_moves<Color::WHITE>(pos, list);
     } else {
         generate_leaper_moves<Color::BLACK>(pos, list);
         generate_slider_moves<Color::BLACK>(pos, list);
         generate_pawn_moves<Color::BLACK>(pos, list);
+        generate_castling_moves<Color::BLACK>(pos, list);
     }
 }
 
