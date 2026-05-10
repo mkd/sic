@@ -165,33 +165,54 @@ void generate_pawn_moves(const Position& pos, MoveList& list) {
     }
 }
 
+
 // ---------------------------------------------------------------------------
-//  Castling Move Generation (Pseudo-legal: no attack checks)
+//  Castling Move Generation
 // ---------------------------------------------------------------------------
 template <Color Us>
 void generate_castling_moves(const Position& pos, MoveList& list) {
     const Bitboard empty = pos.empty_squares();
+    const Color them = (Us == Color::WHITE) ? Color::BLACK : Color::WHITE;
 
     if (Us == Color::WHITE) {
         constexpr Bitboard OO_MASK = {(1ULL << 5) | (1ULL << 6)};
         constexpr Bitboard OOO_MASK = {(1ULL << 1) | (1ULL << 2) | (1ULL << 3)};
 
-        if ((pos.castlingRights & WHITE_OO) && (empty.bb & OO_MASK.bb) == OO_MASK.bb)
-            list.push(make_move(Square::SQ_E1, Square::SQ_G1, MOVE_FLAG_CASTLING));
+        // White Kingside
+        if ((pos.castlingRights & WHITE_OO) && (empty.bb & OO_MASK.bb) == OO_MASK.bb) {
+            // Ensure King is not in check (E1) and doesn't pass through check (F1)
+            if (!pos.is_attacked(Square::SQ_E1, them) && !pos.is_attacked(Square::SQ_F1, them)) {
+                list.push(make_move(Square::SQ_E1, Square::SQ_G1, MOVE_FLAG_CASTLING));
+            }
+        }
 
-        if ((pos.castlingRights & WHITE_OOO) && (empty.bb & OOO_MASK.bb) == OOO_MASK.bb)
-            list.push(make_move(Square::SQ_E1, Square::SQ_C1, MOVE_FLAG_CASTLING));
+        // White Queenside
+        if ((pos.castlingRights & WHITE_OOO) && (empty.bb & OOO_MASK.bb) == OOO_MASK.bb) {
+            // Ensure King is not in check (E1) and doesn't pass through check (D1)
+            if (!pos.is_attacked(Square::SQ_E1, them) && !pos.is_attacked(Square::SQ_D1, them)) {
+                list.push(make_move(Square::SQ_E1, Square::SQ_C1, MOVE_FLAG_CASTLING));
+            }
+        }
     } else {
         constexpr Bitboard OO_MASK = {(1ULL << 61) | (1ULL << 62)};
         constexpr Bitboard OOO_MASK = {(1ULL << 57) | (1ULL << 58) | (1ULL << 59)};
 
-        if ((pos.castlingRights & BLACK_OO) && (empty.bb & OO_MASK.bb) == OO_MASK.bb)
-            list.push(make_move(Square::SQ_E8, Square::SQ_G8, MOVE_FLAG_CASTLING));
+        // Black Kingside
+        if ((pos.castlingRights & BLACK_OO) && (empty.bb & OO_MASK.bb) == OO_MASK.bb) {
+            if (!pos.is_attacked(Square::SQ_E8, them) && !pos.is_attacked(Square::SQ_F8, them)) {
+                list.push(make_move(Square::SQ_E8, Square::SQ_G8, MOVE_FLAG_CASTLING));
+            }
+        }
 
-        if ((pos.castlingRights & BLACK_OOO) && (empty.bb & OOO_MASK.bb) == OOO_MASK.bb)
-            list.push(make_move(Square::SQ_E8, Square::SQ_C8, MOVE_FLAG_CASTLING));
+        // Black Queenside
+        if ((pos.castlingRights & BLACK_OOO) && (empty.bb & OOO_MASK.bb) == OOO_MASK.bb) {
+            if (!pos.is_attacked(Square::SQ_E8, them) && !pos.is_attacked(Square::SQ_D8, them)) {
+                list.push(make_move(Square::SQ_E8, Square::SQ_C8, MOVE_FLAG_CASTLING));
+            }
+        }
     }
 }
+
 
 // ---------------------------------------------------------------------------
 //  Primary Entry Point
