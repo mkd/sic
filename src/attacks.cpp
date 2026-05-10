@@ -99,44 +99,30 @@ void init_king_attacks() {
 // ---------------------------------------------------------------------------
 Bitboard mask_bishop_attacks(Square sq) {
     Bitboard mask = { 0 };
-    const int f = static_cast<int>(sq) % 8;
-    const int r = static_cast<int>(sq) / 8;
-
-    for (int dir = -1; dir <= 1; dir += 2) {
-        for (int d = -1; d <= 1; d += 2) {
-            for (int step = 1; step < 8; ++step) {
-                const int nf = f + dir * step;
-                const int nr = r + d * step;
-                if (nf < 0 || nf > 7 || nr < 0 || nr > 7) break;
-                // Skip the outermost square in each direction (edge can't block)
-                if (nf == 0 || nf == 7 || nr == 0 || nr == 7) break;
-                mask.bb |= 1ULL << (nr * 8 + nf);
-            }
-        }
-    }
+    int r = static_cast<int>(sq) / 8;
+    int f = static_cast<int>(sq) % 8;
+    
+    for (int i = r + 1, j = f + 1; i <= 6 && j <= 6; i++, j++) mask.bb |= (1ULL << (i * 8 + j));
+    for (int i = r + 1, j = f - 1; i <= 6 && j >= 1; i++, j--) mask.bb |= (1ULL << (i * 8 + j));
+    for (int i = r - 1, j = f + 1; i >= 1 && j <= 6; i--, j++) mask.bb |= (1ULL << (i * 8 + j));
+    for (int i = r - 1, j = f - 1; i >= 1 && j >= 1; i--, j--) mask.bb |= (1ULL << (i * 8 + j));
+    
     return mask;
 }
 
 Bitboard mask_rook_attacks(Square sq) {
     Bitboard mask = { 0 };
-    const int f = static_cast<int>(sq) % 8;
-    const int r = static_cast<int>(sq) / 8;
-
-    constexpr int DirF[4] = { 0, 0, -1, 1 };
-    constexpr int DirR[4] = { -1, 1, 0, 0 };
-
-    for (int i = 0; i < 4; ++i) {
-        for (int step = 1; step < 8; ++step) {
-            const int nf = f + DirF[i] * step;
-            const int nr = r + DirR[i] * step;
-            if (nf < 0 || nf > 7 || nr < 0 || nr > 7) break;
-            // Skip the outermost square in each direction (edge can't block)
-            if (nf == 0 || nf == 7 || nr == 0 || nr == 7) break;
-            mask.bb |= 1ULL << (nr * 8 + nf);
-        }
-    }
+    int r = static_cast<int>(sq) / 8;
+    int f = static_cast<int>(sq) % 8;
+    
+    for (int i = r + 1; i <= 6; i++) mask.bb |= (1ULL << (i * 8 + f));
+    for (int i = r - 1; i >= 1; i--) mask.bb |= (1ULL << (i * 8 + f));
+    for (int i = f + 1; i <= 6; i++) mask.bb |= (1ULL << (r * 8 + i));
+    for (int i = f - 1; i >= 1; i--) mask.bb |= (1ULL << (r * 8 + i));
+    
     return mask;
 }
+
 
 // ---------------------------------------------------------------------------
 //  On-The-Fly Slider Attack Generation (Raycasting)
@@ -188,9 +174,6 @@ Bitboard rook_attacks_on_the_fly(Square sq, Bitboard block) {
 // ---------------------------------------------------------------------------
 void init_magic_bitboards() {
     for (int sq = 0; sq < 64; ++sq) {
-        BISHOP_MASKS[sq] = mask_bishop_attacks(static_cast<Square>(sq));
-        ROOK_MASKS[sq] = mask_rook_attacks(static_cast<Square>(sq));
-
         // --- Bishop table ---
         Bitboard b_mask = BISHOP_MASKS[sq];
         int b_shift = 64 - BISHOP_RELEVANT_BITS[sq];
@@ -222,5 +205,6 @@ void init_attacks() {
     init_pawn_attacks();
     init_knight_attacks();
     init_king_attacks();
+    init_magics();
     init_magic_bitboards();
 }
