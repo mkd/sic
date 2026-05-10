@@ -2,6 +2,8 @@
 #include "position.h"
 #include "movegen.h"
 #include "move.h"
+#include "search.h"
+#include "perft.h"
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -90,24 +92,25 @@ static void parse_position(const std::string& args) {
 }
 
 // ---------------------------------------------------------------------------
-//  Parse "go ..." command (stub: pick first legal move)
+//  Parse "go ..." command
 // ---------------------------------------------------------------------------
 static void parse_go(const std::string& args) {
-    (void)args;
+    std::istringstream iss(args);
+    std::string token;
+    int depth = 4;
 
-    MoveList list;
-    MoveGen::generate_legal_moves(g_pos, list);
-
-    for (int i = 0; i < list.size(); ++i) {
-        Position next_pos = g_pos;
-        if (next_pos.make_move(list.moves[i])) {
-            std::cout << "bestmove " << move_to_str(list.moves[i]) << std::endl;
-            std::cout.flush();
+    while (iss >> token) {
+        if (token == "perft") {
+            iss >> depth;
+            perft_divide(g_pos, depth);
             return;
+        } else if (token == "depth") {
+            iss >> depth;
         }
     }
 
-    std::cout << "bestmove 0000" << std::endl;
+    Move best = search_position(g_pos, depth);
+    std::cout << "bestmove " << move_to_str(best) << std::endl;
     std::cout.flush();
 }
 
