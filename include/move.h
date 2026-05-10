@@ -2,6 +2,8 @@
 
 #include "types.h"
 #include "utils.h"
+#include "piece.h"
+#include <string>
 
 // ---------------------------------------------------------------------------
 //  Move Encoding Bit Layout (16 bits, Stockfish style)
@@ -49,6 +51,28 @@ FORCE_INLINE constexpr PieceType move_prom(Move m) {
 
 FORCE_INLINE constexpr int move_flag(Move m) {
     return (m >> 14) & 0x3;
+}
+
+// ---------------------------------------------------------------------------
+//  Square / Move String Conversion
+// ---------------------------------------------------------------------------
+FORCE_INLINE std::string sq_to_str(Square sq) {
+    char buf[3];
+    buf[0] = 'a' + (static_cast<int>(sq) % 8);
+    buf[1] = '1' + (static_cast<int>(sq) / 8);
+    buf[2] = '\0';
+    return std::string(buf);
+}
+
+FORCE_INLINE std::string move_to_str(Move m) {
+    std::string s;
+    s += sq_to_str(move_from(m));
+    s += sq_to_str(move_to(m));
+
+    if (move_prom(m) != PieceType::NONE) {
+        s += type_to_char(move_prom(m));
+    }
+    return s;
 }
 
 // ---------------------------------------------------------------------------
