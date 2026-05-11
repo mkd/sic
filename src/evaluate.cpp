@@ -1,4 +1,5 @@
 #include "../include/evaluate.h"
+#include "../include/nnue.h"
 
 // ---------------------------------------------------------------------------
 //  Piece Values (centipawns)
@@ -21,10 +22,10 @@ constexpr int PawnPST[64] = {
      0,  0, 10, 20, 20, 10,  0,  0,
     -5,  0,  5, 10, 10,  5,  0, -5,
     -5, -5,  0,  5,  5,  0, -5, -5,
-    -10,-10, -5,  0,  0, -5,-10,-10,
-    -10,-10, -5, -5,-10, -5,-10,-10,
-     0,  0,  0,  0,  0,  0,  0,  0,
-     0,  0,  0,  0,  0,  0,  0,  0
+   -10,-10, -5,  0,  0, -5,-10,-10,
+   -10,-10, -5, -5,-10, -5,-10,-10,
+    0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0
 };
 
 constexpr int KnightPST[64] = {
@@ -49,24 +50,41 @@ static FORCE_INLINE int pst_score(Bitboard pieces, const int table[64], bool is_
 }
 
 Value evaluate(const Position& pos) {
-    int white_material = 0;
-    int black_material = 0;
+    if (!nnue_initialized) {
+        int white_material = 0;
+        int black_material = 0;
 
-    for (int pt = 1; pt <= 6; ++pt) {
-        const int val = PieceValues[pt];
-        white_material += popcount(pos.pieces(Color::WHITE) & pos.pieces(static_cast<PieceType>(pt))) * val;
-        black_material += popcount(pos.pieces(Color::BLACK) & pos.pieces(static_cast<PieceType>(pt))) * val;
+        for (int pt = 1; pt <= 6; ++pt) {
+            const int val = PieceValues[pt];
+            white_material += popcount(pos.pieces(Color::WHITE) & pos.pieces(static_cast<PieceType>(pt))) * val;
+            black_material += popcount(pos.pieces(Color::BLACK) & pos.pieces(static_cast<PieceType>(pt))) * val;
+        }
+
+        int score = white_material - black_material;
+
+        Bitboard wp = pos.pieces(Color::WHITE) & pos.pieces(PieceType::PAWN);
+        Bitboard bp = pos.pieces(Color::BLACK) & pos.pieces(PieceType::PAWN);
+        score += pst_score(wp, PawnPST, true) - pst_score(bp, PawnPST, false);
+
+        Bitboard wn = pos.pieces(Color::WHITE) & pos.pieces(PieceType::KNIGHT);
+        Bitboard bn = pos.pieces(Color::BLACK) & pos.pieces(PieceType::KNIGHT);
+        score += pst_score(wn, KnightPST, true) - pst_score(bn, KnightPST, false);
+
+        return (pos.sideToMove == Color::WHITE) ? score : -score;
     }
 
-    int score = white_material - black_material;
+    if (pos.accumulator_stale) {
+        refresh_accumulator(const_cast<Position&>(pos));
+    }
 
-    Bitboard wp = pos.pieces(Color::WHITE) & pos.pieces(PieceType::PAWN);
-    Bitboard bp = pos.pieces(Color::BLACK) & pos.pieces(PieceType::PAWN);
-    score += pst_score(wp, PawnPST, true) - pst_score(bp, PawnPST, false);
+    const int16_t* us = (pos.sideToMove == Color::WHITE) ? pos.accumulator.white : pos.accumulator.black;
+    const int16_t* them = (pos.sideToMove == Color::WHITE) ? pos.accumulator.black : pos.accumulator.white;
 
-    Bitboard wn = pos.pieces(Color::WHITE) & pos.pieces(PieceType::KNIGHT);
-    Bitboard bn = pos.pieces(Color::BLACK) & pos.pieces(PieceType::KNIGHT);
-    score += pst_score(wn, KnightPST, true) - pst_score(bn, KnightPST, false);
+    int32_t sum = 0;
+    for (int i = 0; i < TRANSFORMER_NEURONS; ++i) {
+        sum += clipped_relu(us[i]) * output_weights[i];
+        sum += clipped_relu(them[i]) * output_weights[i + TRANSFORMER_NEURONS];
+    }
 
-    return (pos.sideToMove == Color::WHITE) ? score : -score;
+    return (sum + output_bias) / 16;
 }

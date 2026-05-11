@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <algorithm>
 
 // ---------------------------------------------------------------------------
 //  HalfKP Dimensions
@@ -34,3 +35,16 @@ extern bool nnue_initialized;
 //  Loader
 // ---------------------------------------------------------------------------
 bool load_nnue(const std::string& filepath);
+
+// ---------------------------------------------------------------------------
+//  Activation
+// ---------------------------------------------------------------------------
+constexpr int32_t clipped_relu(int16_t x) {
+    return std::max(int32_t(0), std::min(int32_t(127), static_cast<int32_t>(x)));
+}
+
+// ---------------------------------------------------------------------------
+//  Accumulator Refresh
+// ---------------------------------------------------------------------------
+class Position;
+void refresh_accumulator(Position& pos);
