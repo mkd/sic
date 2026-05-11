@@ -6,6 +6,7 @@
 #include "../include/perft.h"
 #include "../include/timeman.h"
 #include "../include/tt.h"
+#include "../include/nnue.h"
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -184,6 +185,26 @@ void uci_loop() {
         } else if (cmd == "ucinewgame") {
             TimeManager::stop_search = false;
             clear_tt();
+        } else if (cmd == "setoption") {
+            std::string rest;
+            std::getline(iss, rest);
+
+            std::string name;
+            std::string value;
+
+            std::istringstream opt_iss(rest);
+            std::string token;
+            while (opt_iss >> token) {
+                if (token == "name") {
+                    opt_iss >> name;
+                } else if (token == "value") {
+                    opt_iss >> value;
+                }
+            }
+
+            if (name == "EvalFile") {
+                load_nnue(value);
+            }
         } else if (cmd == "position") {
             std::string rest;
             std::getline(iss, rest);

@@ -4,6 +4,7 @@
 #include "utils.h"
 #include "piece.h"
 #include "geometry.h"
+#include "nnue.h"
 #include <string>
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,9 @@ public:
     int halfmoveClock;
     int fullmoveNumber;
     uint64_t zobristKey;
+
+    Accumulator accumulator;
+    bool accumulator_stale;
 
     Position() = default;
 

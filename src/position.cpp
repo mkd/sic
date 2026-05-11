@@ -2,6 +2,7 @@
 #include "../include/utils.h"
 #include "../include/attacks.h"
 #include "../include/move.h"
+#include "../include/nnue.h"
 #include <cstdlib>
 #include <random>
 #include <sstream>
@@ -313,4 +314,6 @@ void Position::set_fen(const std::string& fen) {
 
     iss >> token;
     fullmoveNumber = std::stoi(token);
+
+    accumulator_stale = true;
 }
