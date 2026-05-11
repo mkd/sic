@@ -227,6 +227,18 @@ bool Position::make_move(Move m) {
 }
 
 // ---------------------------------------------------------------------------
+//  Null Move (for NMP)
+// ---------------------------------------------------------------------------
+void Position::make_null_move() {
+    if (epSquare != Square::SQ_NONE) {
+        zobristKey ^= ZobristEpFile[static_cast<int>(epSquare) % 8];
+        epSquare = Square::SQ_NONE;
+    }
+    sideToMove = (sideToMove == Color::WHITE) ? Color::BLACK : Color::WHITE;
+    zobristKey ^= ZobristSide;
+}
+
+// ---------------------------------------------------------------------------
 //  FEN Parsing
 // ---------------------------------------------------------------------------
 void Position::set_fen(const std::string& fen) {

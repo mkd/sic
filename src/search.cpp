@@ -94,7 +94,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta) {
 // ---------------------------------------------------------------------------
 //  Negamax Search
 // ---------------------------------------------------------------------------
-static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta) {
+static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null) {
     pv_length[ply] = ply;
 
     if (TimeManager::stop_search) return 0;
@@ -115,6 +115,16 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta)
         return tt_score;
     }
 
+    // Null Move Pruning
+    if (!is_null && depth >= 3 && ply > 0
+     && evaluate(pos) >= beta
+     && !pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove)) {
+        Position null_pos = pos;
+        null_pos.make_null_move();
+        Value null_val = -negamax(null_pos, depth - 3, ply + 1, -beta, -beta + 1, true);
+        if (null_val >= beta) return beta;
+    }
+
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
     sort_moves(pos, list, tt_move);
@@ -127,7 +137,20 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta)
         Position next_pos = pos;
         if (!next_pos.make_move(list.moves[i])) continue;
 
-        Value val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha);
+        bool is_quiet = (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
+                      && move_prom(list.moves[i]) == PieceType::NONE);
+
+        Value val;
+
+        if (depth >= 3 && i >= 4 && is_quiet) {
+            val = -negamax(next_pos, depth - 2, ply + 1, -alpha - 1, -alpha, false);
+
+            if (val > alpha) {
+                val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false);
+            }
+        } else {
+            val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false);
+        }
 
         if (val > best_value) {
             best_value = val;
@@ -178,7 +201,7 @@ Move search_position(Position& pos, int max_depth) {
             Position next_pos = pos;
             if (!next_pos.make_move(list.moves[i])) continue;
 
-            Value val = -negamax(next_pos, d - 1, 1, -beta, -alpha);
+            Value val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false);
 
             if (val > best_value) {
                 best_value = val;

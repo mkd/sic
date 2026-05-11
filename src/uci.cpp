@@ -138,13 +138,21 @@ static void parse_go(const std::string& args) {
         int increment = (g_pos.sideToMove == Color::WHITE) ? winc : binc;
 
         if (movetime_ms > 0) {
+            // Exact move time (do NOT divide by 25)
             max_depth = 64;
-            TimeManager::init_timer(movetime_ms, 0);
+            TimeManager::start_time = TimeManager::get_time_ms();
+            TimeManager::allocated_time = movetime_ms;
+            TimeManager::stop_search = false;
         } else {
+            // Sudden death tournament match (divide by 25)
             TimeManager::init_timer(time_left, increment);
         }
     } else {
-        TimeManager::init_timer(300000, 0);
+        // No time specified (e.g., 'go depth 17' or 'go infinite')
+        // Give the engine effectively infinite time so it only stops when depth is hit.
+        TimeManager::start_time = TimeManager::get_time_ms();
+        TimeManager::allocated_time = 999999999;
+        TimeManager::stop_search = false;
     }
 
     Move best = search_position(g_pos, max_depth);

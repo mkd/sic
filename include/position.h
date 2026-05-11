@@ -88,4 +88,5 @@ public:
     //  Move Execution
     // -----------------------------------------------------------------------
     bool make_move(Move m);
+    void make_null_move();
 };
