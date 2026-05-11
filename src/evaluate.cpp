@@ -1,7 +1,7 @@
 #include "../include/evaluate.h"
 
 // ---------------------------------------------------------------------------
-//  Piece Square Values (centipawns)
+//  Piece Values (centipawns)
 // ---------------------------------------------------------------------------
 const int PieceValues[7] = {
     0,   // NONE
@@ -13,6 +13,41 @@ const int PieceValues[7] = {
     0    // KING
 };
 
+// ---------------------------------------------------------------------------
+//  Piece-Square Tables (White perspective; flip sq ^ 56 for Black)
+// ---------------------------------------------------------------------------
+constexpr int PawnPST[64] = {
+     0,  0,  0, 30, 30,  0,  0,  0,
+     0,  0, 10, 20, 20, 10,  0,  0,
+    -5,  0,  5, 10, 10,  5,  0, -5,
+    -5, -5,  0,  5,  5,  0, -5, -5,
+    -10,-10, -5,  0,  0, -5,-10,-10,
+    -10,-10, -5, -5,-10, -5,-10,-10,
+     0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0
+};
+
+constexpr int KnightPST[64] = {
+    -10,-10,-10,-10,-10,-10,-10,-10,
+    -10,  0,  0, -5, -5,  0,  0,-10,
+    -10,  0, 10,  5,  5, 10,  0,-10,
+    -10,  5,  5, 10, 10,  5,  5,-10,
+    -10,  0,  5,  5,  5,  5,  0,-10,
+    -10,  0,  5,  0,  0,  5,  0,-10,
+    -10, -5, -5, -5, -5, -5, -5,-10,
+    -10,-10,-10,-10,-10,-10,-10,-10
+};
+
+static FORCE_INLINE int pst_score(Bitboard pieces, const int table[64], bool is_white) {
+    int score = 0;
+    Bitboard bb = pieces;
+    while (bb.bb) {
+        int sq = static_cast<int>(pop_lsb(bb));
+        score += is_white ? table[sq] : table[sq ^ 56];
+    }
+    return score;
+}
+
 Value evaluate(const Position& pos) {
     int white_material = 0;
     int black_material = 0;
@@ -23,6 +58,15 @@ Value evaluate(const Position& pos) {
         black_material += popcount(pos.pieces(Color::BLACK) & pos.pieces(static_cast<PieceType>(pt))) * val;
     }
 
-    const int score = white_material - black_material;
+    int score = white_material - black_material;
+
+    Bitboard wp = pos.pieces(Color::WHITE) & pos.pieces(PieceType::PAWN);
+    Bitboard bp = pos.pieces(Color::BLACK) & pos.pieces(PieceType::PAWN);
+    score += pst_score(wp, PawnPST, true) - pst_score(bp, PawnPST, false);
+
+    Bitboard wn = pos.pieces(Color::WHITE) & pos.pieces(PieceType::KNIGHT);
+    Bitboard bn = pos.pieces(Color::BLACK) & pos.pieces(PieceType::KNIGHT);
+    score += pst_score(wn, KnightPST, true) - pst_score(bn, KnightPST, false);
+
     return (pos.sideToMove == Color::WHITE) ? score : -score;
 }

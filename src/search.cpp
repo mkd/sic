@@ -2,6 +2,7 @@
 #include "../include/evaluate.h"
 #include "../include/movegen.h"
 #include "../include/timeman.h"
+#include "../include/tt.h"
 #include <iostream>
 
 // ---------------------------------------------------------------------------
@@ -12,9 +13,11 @@ static int pv_length[64];
 static uint64_t node_count = 0;
 
 // ---------------------------------------------------------------------------
-//  Move Ordering (MVV-LVA)
+//  Move Ordering (MVV-LVA + TT move)
 // ---------------------------------------------------------------------------
-static int score_move(const Position& pos, Move m) {
+static int score_move(const Position& pos, Move m, Move tt_move) {
+    if (m == tt_move) return 2000000;
+
     Piece victim = pos.piece_on(move_to(m));
     Piece attacker = pos.piece_on(move_from(m));
 
@@ -31,10 +34,10 @@ static int score_move(const Position& pos, Move m) {
     return 0;
 }
 
-static void sort_moves(const Position& pos, MoveList& list) {
+static void sort_moves(const Position& pos, MoveList& list, Move tt_move) {
     int scores[MAX_MOVES];
     for (int i = 0; i < list.size(); ++i) {
-        scores[i] = score_move(pos, list.moves[i]);
+        scores[i] = score_move(pos, list.moves[i], tt_move);
     }
 
     for (int i = 1; i < list.size(); ++i) {
@@ -58,9 +61,10 @@ static Value quiescence(Position& pos, Value alpha, Value beta) {
     if (TimeManager::stop_search) return 0;
 
     node_count++;
-    if (node_count & 2047) return 0;
-    TimeManager::check_time();
-    if (TimeManager::stop_search) return 0;
+    if (!(node_count & 2047)) {
+        TimeManager::check_time();
+        if (TimeManager::stop_search) return 0;
+    }
 
     Value stand_pat = evaluate(pos);
 
@@ -69,7 +73,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta) {
 
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
-    sort_moves(pos, list);
+    sort_moves(pos, list, MOVE_NONE);
 
     for (int i = 0; i < list.size(); ++i) {
         if (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
@@ -105,11 +109,19 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta)
         return quiescence(pos, alpha, beta);
     }
 
+    Move tt_move = MOVE_NONE;
+    Value tt_score;
+    if (ply > 0 && probe_tt(pos.zobristKey, depth, alpha, beta, tt_score, tt_move)) {
+        return tt_score;
+    }
+
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
-    sort_moves(pos, list);
+    sort_moves(pos, list, tt_move);
 
     Value best_value = -VALUE_INFINITE;
+    Move best_move = MOVE_NONE;
+    TTFlag flag = TT_ALPHA;
 
     for (int i = 0; i < list.size(); ++i) {
         Position next_pos = pos;
@@ -119,6 +131,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta)
 
         if (val > best_value) {
             best_value = val;
+            best_move = list.moves[i];
             pv_array[ply][ply] = list.moves[i];
             for (int j = ply + 1; j < pv_length[ply + 1]; ++j) {
                 pv_array[ply][j] = pv_array[ply + 1][j];
@@ -126,10 +139,19 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta)
             pv_length[ply] = pv_length[ply + 1];
         }
 
-        if (val > alpha) alpha = val;
-        if (alpha >= beta) break;
+        if (val > alpha) {
+            alpha = val;
+            flag = TT_EXACT;
+        }
+
+        if (alpha >= beta) {
+            flag = TT_BETA;
+            best_move = list.moves[i];
+            break;
+        }
     }
 
+    record_tt(pos.zobristKey, depth, best_value, flag, best_move);
     return best_value;
 }
 
@@ -148,7 +170,7 @@ Move search_position(Position& pos, int max_depth) {
 
         MoveList list;
         MoveGen::generate_legal_moves(pos, list);
-        sort_moves(pos, list);
+        sort_moves(pos, list, MOVE_NONE);
 
         Value best_value = -VALUE_INFINITE;
 
@@ -161,7 +183,6 @@ Move search_position(Position& pos, int max_depth) {
             if (val > best_value) {
                 best_value = val;
                 pv_array[0][0] = list.moves[i];
-                // Copy the rest of the PV line from ply 1 to ply 0
                 for (int j = 1; j < pv_length[1]; ++j) {
                     pv_array[0][j] = pv_array[1][j];
                 }

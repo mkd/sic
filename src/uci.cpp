@@ -5,6 +5,7 @@
 #include "../include/search.h"
 #include "../include/perft.h"
 #include "../include/timeman.h"
+#include "../include/tt.h"
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -174,6 +175,7 @@ void uci_loop() {
             std::cout << "readyok" << std::endl;
         } else if (cmd == "ucinewgame") {
             TimeManager::stop_search = false;
+            clear_tt();
         } else if (cmd == "position") {
             std::string rest;
             std::getline(iss, rest);
