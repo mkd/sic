@@ -1,5 +1,5 @@
-#include "perft.h"
-#include "movegen.h"
+#include "../include/perft.h"
+#include "../include/movegen.h"
 #include <iostream>
 
 // ---------------------------------------------------------------------------

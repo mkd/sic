@@ -37,10 +37,14 @@ void init_pawn_attacks() {
         const Bitboard b = sq_bb(static_cast<Square>(sq));
 
         // White pawns attack "up" the board
-        PAWN_ATTACKS[0][sq] = { ((b.bb << 7) & ~FILE_A_MASK.bb) | ((b.bb << 9) & ~FILE_H_MASK.bb) };
+        // << 7 moves Up-Left. A piece on File A wraps to File H, so we clear File H.
+        // << 9 moves Up-Right. A piece on File H wraps to File A, so we clear File A.
+        PAWN_ATTACKS[0][sq] = { ((b.bb << 7) & ~FILE_H_MASK.bb) | ((b.bb << 9) & ~FILE_A_MASK.bb) };
 
         // Black pawns attack "down" the board
-        PAWN_ATTACKS[1][sq] = { ((b.bb >> 7) & ~FILE_H_MASK.bb) | ((b.bb >> 9) & ~FILE_A_MASK.bb) };
+        // >> 7 moves Down-Right. A piece on File H wraps to File A, so we clear File A.
+        // >> 9 moves Down-Left. A piece on File A wraps to File H, so we clear File H.
+        PAWN_ATTACKS[1][sq] = { ((b.bb >> 7) & ~FILE_A_MASK.bb) | ((b.bb >> 9) & ~FILE_H_MASK.bb) };
     }
 }
 

@@ -1,7 +1,7 @@
-#include "search.h"
-#include "evaluate.h"
-#include "movegen.h"
-#include "timeman.h"
+#include "../include/search.h"
+#include "../include/evaluate.h"
+#include "../include/movegen.h"
+#include "../include/timeman.h"
 #include <iostream>
 
 // ---------------------------------------------------------------------------

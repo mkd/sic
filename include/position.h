@@ -71,4 +71,21 @@ public:
     FORCE_INLINE Bitboard empty_squares() const {
         return ~occupied();
     }
+
+    // -----------------------------------------------------------------------
+    //  King Location
+    // -----------------------------------------------------------------------
+    FORCE_INLINE Square get_king_square(Color c) const {
+        return lsb(pieces(c) & pieces(PieceType::KING));
+    }
+
+    // -----------------------------------------------------------------------
+    //  Attack Detection
+    // -----------------------------------------------------------------------
+    bool is_attacked(Square sq, Color attacker) const;
+
+    // -----------------------------------------------------------------------
+    //  Move Execution
+    // -----------------------------------------------------------------------
+    bool make_move(Move m);
 };

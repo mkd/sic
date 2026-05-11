@@ -1,5 +1,8 @@
-#include "position.h"
-#include "utils.h"
+#include "../include/position.h"
+#include "../include/utils.h"
+#include "../include/attacks.h"
+#include "../include/move.h"
+#include <cstdlib>
 #include <random>
 #include <sstream>
 #include <cassert>
@@ -33,10 +36,200 @@ void init_zobrist() {
 }
 
 // ---------------------------------------------------------------------------
+//  Castling Rights Mask — removes rights when king/rook moves or is captured
+//    A1=13(1101), H1=14(1110), E1=12(1100)
+//    A8=7(0111),  H8=11(1011), E8=3(0011)
+// ---------------------------------------------------------------------------
+constexpr int CASTLING_RIGHTS_MASK[64] = {
+    13, 15, 15, 15, 12, 15, 15, 14,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    7,  15, 15, 15, 3,  15, 15, 11
+};
+
+// ---------------------------------------------------------------------------
+//  Attack Detection
+// ---------------------------------------------------------------------------
+bool Position::is_attacked(Square sq, Color attacker) const {
+    const Bitboard attackerBB = pieces(attacker);
+    const Bitboard occ = occupied();
+    const int sq_int = static_cast<int>(sq);
+
+    // Pawn attacks (vectorized: PAWN_ATTACKS[~attacker][sq] gives squares where
+    // attacker's pawns would be if they attack sq)
+    {
+        const Bitboard pawns = attackerBB & pieces(PieceType::PAWN);
+        if (pawns.bb && (PAWN_ATTACKS[static_cast<int>(~attacker)][sq_int].bb & pawns.bb))
+            return true;
+    }
+
+    // Knight attacks
+    {
+        const Bitboard knights = attackerBB & pieces(PieceType::KNIGHT);
+        if (knights.bb && (KNIGHT_ATTACKS[sq_int] & knights.bb))
+            return true;
+    }
+
+    // King attacks
+    {
+        const Bitboard kings = attackerBB & pieces(PieceType::KING);
+        if (kings.bb && (KING_ATTACKS[sq_int] & kings.bb))
+            return true;
+    }
+
+    // Bishop/Queen diagonal attacks
+    {
+        const Bitboard diagonals = attackerBB & (pieces(PieceType::BISHOP) | pieces(PieceType::QUEEN));
+        if (diagonals.bb && (get_bishop_attacks(sq, occ) & diagonals.bb))
+            return true;
+    }
+
+    // Rook/Queen orthogonal attacks
+    {
+        const Bitboard orthogonals = attackerBB & (pieces(PieceType::ROOK) | pieces(PieceType::QUEEN));
+        if (orthogonals.bb && (get_rook_attacks(sq, occ) & orthogonals.bb))
+            return true;
+    }
+
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+//  Make Move (with legality check)
+// ---------------------------------------------------------------------------
+bool Position::make_move(Move m) {
+    const Square from = move_from(m);
+    const Square to = move_to(m);
+    const int flag = move_flag(m);
+    const PieceType prom = move_prom(m);
+
+    const int from_int = static_cast<int>(from);
+    const int to_int = static_cast<int>(to);
+
+    const Piece moving_piece = board[from_int];
+    const Piece captured_piece = board[to_int];
+    const Color us = sideToMove;
+    const Color them = ~us;
+
+    // --- Update Zobrist: remove moving piece ---
+    zobristKey ^= ZobristPiece[static_cast<int>(moving_piece)][from_int];
+
+    // --- Move the piece on the board ---
+    board[from_int] = Piece::PIECE_NONE;
+    byTypeBB[static_cast<int>(moving_piece) % 6 + 1].bb &= ~(1ULL << from_int);
+    byColorBB[static_cast<int>(us)].bb &= ~(1ULL << from_int);
+
+    // --- Handle capture ---
+    if (captured_piece != Piece::PIECE_NONE) {
+        zobristKey ^= ZobristPiece[static_cast<int>(captured_piece)][to_int];
+        byTypeBB[static_cast<int>(captured_piece) % 6 + 1].bb &= ~(1ULL << to_int);
+        byColorBB[static_cast<int>(them)].bb &= ~(1ULL << to_int);
+    }
+
+    // --- Place moving piece on destination ---
+    Piece placed_piece = moving_piece;
+
+    // Promotion
+    if (prom != PieceType::NONE) {
+        placed_piece = make_piece(us, prom);
+    }
+
+    board[to_int] = placed_piece;
+    byTypeBB[static_cast<int>(placed_piece) % 6 + 1].bb |= (1ULL << to_int);
+    byColorBB[static_cast<int>(us)].bb |= (1ULL << to_int);
+    zobristKey ^= ZobristPiece[static_cast<int>(placed_piece)][to_int];
+
+    // --- En Passant capture ---
+    if (flag == MOVE_FLAG_ENPASSANT) {
+        const int captured_sq = to_int + (us == Color::WHITE ? -8 : 8);
+        const Piece ep_pawn = board[captured_sq];
+        zobristKey ^= ZobristPiece[static_cast<int>(ep_pawn)][captured_sq];
+        board[captured_sq] = Piece::PIECE_NONE;
+        byTypeBB[static_cast<int>(ep_pawn) % 6 + 1].bb &= ~(1ULL << captured_sq);
+        byColorBB[static_cast<int>(them)].bb &= ~(1ULL << captured_sq);
+    }
+
+    // --- Castling: move the rook ---
+    if (flag == MOVE_FLAG_CASTLING) {
+        if (to == Square::SQ_G1) { // White kingside
+            board[7] = Piece::WHITE_ROOK;
+            board[5] = Piece::PIECE_NONE;
+            byTypeBB[4].bb &= ~(1ULL << 7);
+            byColorBB[0].bb &= ~(1ULL << 7);
+            byTypeBB[4].bb |= (1ULL << 5);
+            byColorBB[0].bb |= (1ULL << 5);
+            zobristKey ^= ZobristPiece[3][7];
+            zobristKey ^= ZobristPiece[3][5];
+        } else if (to == Square::SQ_C1) { // White queenside
+            board[0] = Piece::WHITE_ROOK;
+            board[3] = Piece::PIECE_NONE;
+            byTypeBB[4].bb &= ~(1ULL << 0);
+            byColorBB[0].bb &= ~(1ULL << 0);
+            byTypeBB[4].bb |= (1ULL << 3);
+            byColorBB[0].bb |= (1ULL << 3);
+            zobristKey ^= ZobristPiece[3][0];
+            zobristKey ^= ZobristPiece[3][3];
+        } else if (to == Square::SQ_G8) { // Black kingside
+            board[63] = Piece::BLACK_ROOK;
+            board[61] = Piece::PIECE_NONE;
+            byTypeBB[4].bb &= ~(1ULL << 63);
+            byColorBB[1].bb &= ~(1ULL << 63);
+            byTypeBB[4].bb |= (1ULL << 61);
+            byColorBB[1].bb |= (1ULL << 61);
+            zobristKey ^= ZobristPiece[9][63];
+            zobristKey ^= ZobristPiece[9][61];
+        } else if (to == Square::SQ_C8) { // Black queenside
+            board[56] = Piece::BLACK_ROOK;
+            board[59] = Piece::PIECE_NONE;
+            byTypeBB[4].bb &= ~(1ULL << 56);
+            byColorBB[1].bb &= ~(1ULL << 56);
+            byTypeBB[4].bb |= (1ULL << 59);
+            byColorBB[1].bb |= (1ULL << 59);
+            zobristKey ^= ZobristPiece[9][56];
+            zobristKey ^= ZobristPiece[9][59];
+        }
+    }
+
+    // --- Update castling rights ---
+    zobristKey ^= ZobristCastling[castlingRights];
+    castlingRights &= CASTLING_RIGHTS_MASK[from_int];
+    castlingRights &= CASTLING_RIGHTS_MASK[to_int];
+    zobristKey ^= ZobristCastling[castlingRights];
+
+    // --- Update en passant square ---
+    if (epSquare != Square::SQ_NONE) {
+        zobristKey ^= ZobristEpFile[static_cast<int>(epSquare) % 8];
+    }
+    epSquare = Square::SQ_NONE;
+
+    // Double pawn push
+    if (piece_type(moving_piece) == PieceType::PAWN &&
+        std::abs(static_cast<int>(to) - static_cast<int>(from)) == 16) {
+        epSquare = static_cast<Square>((static_cast<int>(from) + static_cast<int>(to)) / 2);
+        zobristKey ^= ZobristEpFile[static_cast<int>(epSquare) % 8];
+    }
+
+    // --- Swap side to move ---
+    zobristKey ^= ZobristSide;
+    sideToMove = them;
+
+    // --- Legality check: is the king of the side that just moved in check? ---
+    const Square our_king = get_king_square(us);
+    if (is_attacked(our_king, sideToMove)) {
+        return false;
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 //  FEN Parsing
 // ---------------------------------------------------------------------------
 void Position::set_fen(const std::string& fen) {
-    // Clear all state
     for (int i = 0; i < 7; ++i) byTypeBB[i] = {0};
     for (int i = 0; i < 2; ++i) byColorBB[i] = {0};
     for (int i = 0; i < 64; ++i) board[i] = Piece::PIECE_NONE;
@@ -50,7 +243,6 @@ void Position::set_fen(const std::string& fen) {
 
     std::istringstream iss(fen);
 
-    // --- Piece placement ---
     std::string token;
     iss >> token;
 
@@ -74,14 +266,12 @@ void Position::set_fen(const std::string& fen) {
         }
     }
 
-    // --- Side to move ---
     iss >> token;
     sideToMove = (token == "w") ? Color::WHITE : Color::BLACK;
     if (sideToMove == Color::BLACK) {
         zobristKey ^= ZobristSide;
     }
 
-    // --- Castling rights ---
     iss >> token;
     if (token == "-") {
         castlingRights = CASTLING_NONE;
@@ -98,7 +288,6 @@ void Position::set_fen(const std::string& fen) {
     }
     zobristKey ^= ZobristCastling[castlingRights];
 
-    // --- En passant square ---
     iss >> token;
     if (token != "-") {
         int file = token[0] - 'a';
@@ -107,11 +296,9 @@ void Position::set_fen(const std::string& fen) {
         zobristKey ^= ZobristEpFile[file];
     }
 
-    // --- Halfmove clock ---
     iss >> token;
     halfmoveClock = std::stoi(token);
 
-    // --- Fullmove number ---
     iss >> token;
     fullmoveNumber = std::stoi(token);
 }

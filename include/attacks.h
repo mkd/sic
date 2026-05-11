@@ -13,8 +13,8 @@ extern Bitboard KING_ATTACKS[64];
 // ---------------------------------------------------------------------------
 //  Magic Bitboard Constants (extern; linked from src/magics.cpp)
 // ---------------------------------------------------------------------------
-extern const Bitboard BISHOP_MAGICS[64];
-extern const Bitboard ROOK_MAGICS[64];
+extern Bitboard BISHOP_MAGICS[64];
+extern Bitboard ROOK_MAGICS[64];
 extern const int BISHOP_RELEVANT_BITS[64];
 extern const int ROOK_RELEVANT_BITS[64];
 
@@ -53,6 +53,7 @@ FORCE_INLINE Bitboard get_rook_attacks(Square sq, Bitboard occupied) {
 // ---------------------------------------------------------------------------
 //  Initialization
 // ---------------------------------------------------------------------------
+void init_magics();
 void init_magic_bitboards();
 void init_attacks();
 void init_pawn_attacks();

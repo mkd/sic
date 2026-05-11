@@ -1,9 +1,10 @@
-#include "uci.h"
-#include "position.h"
-#include "movegen.h"
-#include "move.h"
-#include "search.h"
-#include "perft.h"
+#include "../include/uci.h"
+#include "../include/position.h"
+#include "../include/movegen.h"
+#include "../include/move.h"
+#include "../include/search.h"
+#include "../include/perft.h"
+#include "../include/timeman.h"
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -97,19 +98,55 @@ static void parse_position(const std::string& args) {
 static void parse_go(const std::string& args) {
     std::istringstream iss(args);
     std::string token;
-    int depth = 4;
+    int max_depth = 64;
+    bool has_time = false;
+    int wtime = 300000, btime = 300000, winc = 0, binc = 0;
+    int movetime_ms = 0;
+    bool infinite = false;
 
     while (iss >> token) {
         if (token == "perft") {
-            iss >> depth;
-            perft_divide(g_pos, depth);
+            int d;
+            iss >> d;
+            perft_divide(g_pos, d);
             return;
         } else if (token == "depth") {
-            iss >> depth;
+            iss >> max_depth;
+        } else if (token == "wtime") {
+            iss >> wtime;
+            has_time = true;
+        } else if (token == "btime") {
+            iss >> btime;
+            has_time = true;
+        } else if (token == "winc") {
+            iss >> winc;
+        } else if (token == "binc") {
+            iss >> binc;
+        } else if (token == "movetime") {
+            iss >> movetime_ms;
+            has_time = true;
+        } else if (token == "infinite") {
+            infinite = true;
         }
     }
 
-    Move best = search_position(g_pos, depth);
+    (void)infinite;
+
+    if (has_time) {
+        int time_left = (g_pos.sideToMove == Color::WHITE) ? wtime : btime;
+        int increment = (g_pos.sideToMove == Color::WHITE) ? winc : binc;
+
+        if (movetime_ms > 0) {
+            max_depth = 64;
+            TimeManager::init_timer(movetime_ms, 0);
+        } else {
+            TimeManager::init_timer(time_left, increment);
+        }
+    } else {
+        TimeManager::init_timer(300000, 0);
+    }
+
+    Move best = search_position(g_pos, max_depth);
     std::cout << "bestmove " << move_to_str(best) << std::endl;
     std::cout.flush();
 }
@@ -118,6 +155,8 @@ static void parse_go(const std::string& args) {
 //  UCI Main Loop
 // ---------------------------------------------------------------------------
 void uci_loop() {
+    g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+
     std::string line;
 
     while (std::getline(std::cin, line)) {
@@ -128,13 +167,13 @@ void uci_loop() {
         iss >> cmd;
 
         if (cmd == "uci") {
-            std::cout << "id name sic" << std::endl;
-            std::cout << "id author sic-team" << std::endl;
+            std::cout << "id name Sic" << std::endl;
+            std::cout << "id author Claudio M. Camacho <claudiomkd@gmail.com>" << std::endl;
             std::cout << "uciok" << std::endl;
         } else if (cmd == "isready") {
             std::cout << "readyok" << std::endl;
         } else if (cmd == "ucinewgame") {
-            // TT / history cleared here (future)
+            TimeManager::stop_search = false;
         } else if (cmd == "position") {
             std::string rest;
             std::getline(iss, rest);

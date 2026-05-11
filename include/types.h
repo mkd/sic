@@ -91,7 +91,7 @@ inline constexpr Color color_of(Piece pc) {
 
 inline constexpr PieceType piece_type(Piece pc) {
     if (pc == Piece::PIECE_NONE) return PieceType::NONE;
-    return static_cast<PieceType>(static_cast<int8_t>(pc) % 6);
+    return static_cast<PieceType>(static_cast<int8_t>(pc) % 6 + 1);
 }
 
 inline constexpr bool operator==(Piece pc1, Piece pc2) {

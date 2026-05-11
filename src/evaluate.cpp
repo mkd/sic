@@ -1,9 +1,9 @@
-#include "evaluate.h"
+#include "../include/evaluate.h"
 
 // ---------------------------------------------------------------------------
 //  Piece Square Values (centipawns)
 // ---------------------------------------------------------------------------
-constexpr int PieceValues[7] = {
+const int PieceValues[7] = {
     0,   // NONE
     100, // PAWN
     300, // KNIGHT
