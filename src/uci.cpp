@@ -6,7 +6,7 @@
 #include "../include/perft.h"
 #include "../include/timeman.h"
 #include "../include/tt.h"
-#include "../include/nnue.h"
+#include "../include/nnue_bridge.h"
 #include "../include/thread.h"
 #include <iostream>
 #include <string>

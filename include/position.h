@@ -4,8 +4,9 @@
 #include "utils.h"
 #include "piece.h"
 #include "geometry.h"
-#include "nnue.h"
 #include <string>
+#include <cstdint>
+#include <cstddef>
 
 // ---------------------------------------------------------------------------
 //  Zobrist Hashing Tables (extern; populated by init_zobrist())
@@ -29,6 +30,27 @@ enum CastlingSide : int {
 };
 
 // ---------------------------------------------------------------------------
+//  NNUE Accumulator State (layout-compatible with nnue-probe's types)
+//  Defined at namespace scope so nnue_bridge.h can reference them.
+// ---------------------------------------------------------------------------
+struct NNUEAccumulator {
+    alignas(64) int16_t accumulation[2][256];
+    int computedAccumulation;
+};
+
+struct NNUEDirtyPiece {
+    int dirtyNum;
+    int pc[3];
+    int from[3];
+    int to[3];
+};
+
+struct NNUEState {
+    NNUEAccumulator accumulator;
+    NNUEDirtyPiece dirtyPiece;
+};
+
+// ---------------------------------------------------------------------------
 //  Position Class
 // ---------------------------------------------------------------------------
 class Position {
@@ -43,8 +65,10 @@ public:
     int fullmoveNumber;
     uint64_t zobristKey;
 
-    Accumulator accumulator;
-    bool accumulator_stale;
+    NNUEState nnueState;
+    NNUEState* nnueStatePlyMinus1;
+    NNUEState* nnueStatePlyMinus2;
+    bool nnueStale;
 
     Position() = default;
 

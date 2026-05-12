@@ -2,11 +2,11 @@
 #include "../include/utils.h"
 #include "../include/attacks.h"
 #include "../include/move.h"
-#include "../include/nnue.h"
 #include <cstdlib>
 #include <random>
 #include <sstream>
 #include <cassert>
+#include <cstring>
 
 // ---------------------------------------------------------------------------
 //  Zobrist Hashing Tables
@@ -116,10 +116,36 @@ bool Position::make_move(Move m) {
     const Color us = sideToMove;
     const Color them = ~us;
 
-    bool was_stale = accumulator_stale;
-
+    // --- NNUE: mark stale if king moves ---
     if (piece_type(moving_piece) == PieceType::KING) {
-        accumulator_stale = true;
+        nnueStale = true;
+    }
+
+    // --- NNUE: track dirty pieces for incremental update ---
+    // nnue-probe piece codes: wking=1..wpawn=6, bking=7..bpawn=12
+    // Sic piece codes: 0..11. Conversion: nnue_code = sic_code + 1
+    int dirtyNum = 0;
+    if (!nnueStale) {
+        // Removing piece from 'from'
+        nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(moving_piece) + 1;
+        nnueState.dirtyPiece.from[dirtyNum] = from_int;
+        nnueState.dirtyPiece.to[dirtyNum] = 64;
+        dirtyNum++;
+
+        // If capture, removing piece from 'to'
+        if (captured_piece != Piece::PIECE_NONE) {
+            nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(captured_piece) + 1;
+            nnueState.dirtyPiece.from[dirtyNum] = to_int;
+            nnueState.dirtyPiece.to[dirtyNum] = 64;
+            dirtyNum++;
+        }
+
+        // Placing piece on 'to'
+        Piece placed_piece = (prom != PieceType::NONE) ? make_piece(us, prom) : moving_piece;
+        nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(placed_piece) + 1;
+        nnueState.dirtyPiece.from[dirtyNum] = 64;
+        nnueState.dirtyPiece.to[dirtyNum] = to_int;
+        dirtyNum++;
     }
 
     // --- Update Zobrist: remove moving piece ---
@@ -130,37 +156,20 @@ bool Position::make_move(Move m) {
     byTypeBB[static_cast<int>(moving_piece) % 6 + 1].bb &= ~(1ULL << from_int);
     byColorBB[static_cast<int>(us)].bb &= ~(1ULL << from_int);
 
-    if (!accumulator_stale && !was_stale) {
-        update_accumulator_piece(*this, moving_piece, from, false);
-    }
-
     // --- Handle capture ---
     if (captured_piece != Piece::PIECE_NONE) {
         zobristKey ^= ZobristPiece[static_cast<int>(captured_piece)][to_int];
         byTypeBB[static_cast<int>(captured_piece) % 6 + 1].bb &= ~(1ULL << to_int);
         byColorBB[static_cast<int>(them)].bb &= ~(1ULL << to_int);
-
-        if (!accumulator_stale && !was_stale) {
-            update_accumulator_piece(*this, captured_piece, to, false);
-        }
     }
 
     // --- Place moving piece on destination ---
-    Piece placed_piece = moving_piece;
-
-    // Promotion
-    if (prom != PieceType::NONE) {
-        placed_piece = make_piece(us, prom);
-    }
+    Piece placed_piece = (prom != PieceType::NONE) ? make_piece(us, prom) : moving_piece;
 
     board[to_int] = placed_piece;
     byTypeBB[static_cast<int>(placed_piece) % 6 + 1].bb |= (1ULL << to_int);
     byColorBB[static_cast<int>(us)].bb |= (1ULL << to_int);
     zobristKey ^= ZobristPiece[static_cast<int>(placed_piece)][to_int];
-
-    if (!accumulator_stale && !was_stale) {
-        update_accumulator_piece(*this, placed_piece, to, true);
-    }
 
     // --- En Passant capture ---
     if (flag == MOVE_FLAG_ENPASSANT) {
@@ -171,51 +180,53 @@ bool Position::make_move(Move m) {
         byTypeBB[static_cast<int>(ep_pawn) % 6 + 1].bb &= ~(1ULL << captured_sq);
         byColorBB[static_cast<int>(them)].bb &= ~(1ULL << captured_sq);
 
-        if (!accumulator_stale && !was_stale) {
-            update_accumulator_piece(*this, ep_pawn, static_cast<Square>(captured_sq), false);
+        if (!nnueStale) {
+            nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(ep_pawn) + 1;
+            nnueState.dirtyPiece.from[dirtyNum] = captured_sq;
+            nnueState.dirtyPiece.to[dirtyNum] = 64;
+            dirtyNum++;
         }
     }
 
     // --- Castling: move the rook ---
     if (flag == MOVE_FLAG_CASTLING) {
-        if (to == Square::SQ_G1) { // White kingside
-            board[7] = Piece::WHITE_ROOK;
-            board[5] = Piece::PIECE_NONE;
-            byTypeBB[4].bb &= ~(1ULL << 7);
-            byColorBB[0].bb &= ~(1ULL << 7);
-            byTypeBB[4].bb |= (1ULL << 5);
-            byColorBB[0].bb |= (1ULL << 5);
-            zobristKey ^= ZobristPiece[3][7];
-            zobristKey ^= ZobristPiece[3][5];
-        } else if (to == Square::SQ_C1) { // White queenside
-            board[0] = Piece::WHITE_ROOK;
-            board[3] = Piece::PIECE_NONE;
-            byTypeBB[4].bb &= ~(1ULL << 0);
-            byColorBB[0].bb &= ~(1ULL << 0);
-            byTypeBB[4].bb |= (1ULL << 3);
-            byColorBB[0].bb |= (1ULL << 3);
-            zobristKey ^= ZobristPiece[3][0];
-            zobristKey ^= ZobristPiece[3][3];
-        } else if (to == Square::SQ_G8) { // Black kingside
-            board[63] = Piece::BLACK_ROOK;
-            board[61] = Piece::PIECE_NONE;
-            byTypeBB[4].bb &= ~(1ULL << 63);
-            byColorBB[1].bb &= ~(1ULL << 63);
-            byTypeBB[4].bb |= (1ULL << 61);
-            byColorBB[1].bb |= (1ULL << 61);
-            zobristKey ^= ZobristPiece[9][63];
-            zobristKey ^= ZobristPiece[9][61];
-        } else if (to == Square::SQ_C8) { // Black queenside
-            board[56] = Piece::BLACK_ROOK;
-            board[59] = Piece::PIECE_NONE;
-            byTypeBB[4].bb &= ~(1ULL << 56);
-            byColorBB[1].bb &= ~(1ULL << 56);
-            byTypeBB[4].bb |= (1ULL << 59);
-            byColorBB[1].bb |= (1ULL << 59);
-            zobristKey ^= ZobristPiece[9][56];
-            zobristKey ^= ZobristPiece[9][59];
+        int rookFrom = -1, rookTo = -1;
+        Piece rookPiece = Piece::PIECE_NONE;
+        if (to == Square::SQ_G1) { // White kingside: rook H1(7) -> F1(5)
+            rookFrom = 7; rookTo = 5; rookPiece = Piece::WHITE_ROOK;
+        } else if (to == Square::SQ_C1) { // White queenside: rook A1(0) -> D1(3)
+            rookFrom = 0; rookTo = 3; rookPiece = Piece::WHITE_ROOK;
+        } else if (to == Square::SQ_G8) { // Black kingside: rook H8(63) -> F8(61)
+            rookFrom = 63; rookTo = 61; rookPiece = Piece::BLACK_ROOK;
+        } else if (to == Square::SQ_C8) { // Black queenside: rook A8(56) -> D8(59)
+            rookFrom = 56; rookTo = 59; rookPiece = Piece::BLACK_ROOK;
+        }
+
+        if (rookFrom >= 0) {
+            board[rookFrom] = Piece::PIECE_NONE;
+            board[rookTo] = rookPiece;
+            byTypeBB[4].bb &= ~(1ULL << rookFrom);
+            byColorBB[static_cast<int>(us)].bb &= ~(1ULL << rookFrom);
+            byTypeBB[4].bb |= (1ULL << rookTo);
+            byColorBB[static_cast<int>(us)].bb |= (1ULL << rookTo);
+            zobristKey ^= ZobristPiece[static_cast<int>(rookPiece)][rookFrom];
+            zobristKey ^= ZobristPiece[static_cast<int>(rookPiece)][rookTo];
+
+            if (!nnueStale) {
+                nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(rookPiece) + 1;
+                nnueState.dirtyPiece.from[dirtyNum] = rookFrom;
+                nnueState.dirtyPiece.to[dirtyNum] = 64;
+                dirtyNum++;
+                nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(rookPiece) + 1;
+                nnueState.dirtyPiece.from[dirtyNum] = 64;
+                nnueState.dirtyPiece.to[dirtyNum] = rookTo;
+                dirtyNum++;
+            }
         }
     }
+
+    // --- NNUE: finalize dirty piece count ---
+    nnueState.dirtyPiece.dirtyNum = dirtyNum;
 
     // --- Update castling rights ---
     zobristKey ^= ZobristCastling[castlingRights];
@@ -257,8 +268,10 @@ void Position::make_null_move() {
         zobristKey ^= ZobristEpFile[static_cast<int>(epSquare) % 8];
         epSquare = Square::SQ_NONE;
     }
-    sideToMove = (sideToMove == Color::WHITE) ? Color::BLACK : Color::WHITE;
+    sideToMove = (sideToMove == Color::BLACK) ? Color::WHITE : Color::BLACK;
     zobristKey ^= ZobristSide;
+    nnueStale = true;
+    nnueState.dirtyPiece.dirtyNum = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +288,13 @@ void Position::set_fen(const std::string& fen) {
     halfmoveClock = 0;
     fullmoveNumber = 1;
     zobristKey = 0;
+
+    // --- Initialize NNUE state ---
+    std::memset(&nnueState, 0, sizeof(NNUEState));
+    nnueState.accumulator.computedAccumulation = 0;
+    nnueStatePlyMinus1 = nullptr;
+    nnueStatePlyMinus2 = nullptr;
+    nnueStale = true;
 
     std::istringstream iss(fen);
 
@@ -337,5 +357,5 @@ void Position::set_fen(const std::string& fen) {
     iss >> token;
     fullmoveNumber = std::stoi(token);
 
-    accumulator_stale = true;
+    nnueStale = true;
 }
