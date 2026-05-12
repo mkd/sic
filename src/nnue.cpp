@@ -80,3 +80,26 @@ void refresh_accumulator(Position& pos) {
 
     pos.accumulator_stale = false;
 }
+
+// ---------------------------------------------------------------------------
+//  Incremental Accumulator Update
+// ---------------------------------------------------------------------------
+void update_accumulator_piece(Position& pos, Piece pc, Square sq, bool is_add) {
+    Square w_king = pos.get_king_square(Color::WHITE);
+    Square b_king = pos.get_king_square(Color::BLACK);
+
+    int w_idx = make_halfkp_index(true, w_king, pc, sq);
+    int b_idx = make_halfkp_index(false, b_king, pc, sq);
+
+    if (is_add) {
+        for (int i = 0; i < TRANSFORMER_NEURONS; ++i) {
+            pos.accumulator.white[i] += ft_weights[w_idx][i];
+            pos.accumulator.black[i] += ft_weights[b_idx][i];
+        }
+    } else {
+        for (int i = 0; i < TRANSFORMER_NEURONS; ++i) {
+            pos.accumulator.white[i] -= ft_weights[w_idx][i];
+            pos.accumulator.black[i] -= ft_weights[b_idx][i];
+        }
+    }
+}

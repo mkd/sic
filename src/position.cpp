@@ -116,6 +116,12 @@ bool Position::make_move(Move m) {
     const Color us = sideToMove;
     const Color them = ~us;
 
+    bool was_stale = accumulator_stale;
+
+    if (piece_type(moving_piece) == PieceType::KING) {
+        accumulator_stale = true;
+    }
+
     // --- Update Zobrist: remove moving piece ---
     zobristKey ^= ZobristPiece[static_cast<int>(moving_piece)][from_int];
 
@@ -124,11 +130,19 @@ bool Position::make_move(Move m) {
     byTypeBB[static_cast<int>(moving_piece) % 6 + 1].bb &= ~(1ULL << from_int);
     byColorBB[static_cast<int>(us)].bb &= ~(1ULL << from_int);
 
+    if (!accumulator_stale && !was_stale) {
+        update_accumulator_piece(*this, moving_piece, from, false);
+    }
+
     // --- Handle capture ---
     if (captured_piece != Piece::PIECE_NONE) {
         zobristKey ^= ZobristPiece[static_cast<int>(captured_piece)][to_int];
         byTypeBB[static_cast<int>(captured_piece) % 6 + 1].bb &= ~(1ULL << to_int);
         byColorBB[static_cast<int>(them)].bb &= ~(1ULL << to_int);
+
+        if (!accumulator_stale && !was_stale) {
+            update_accumulator_piece(*this, captured_piece, to, false);
+        }
     }
 
     // --- Place moving piece on destination ---
@@ -144,6 +158,10 @@ bool Position::make_move(Move m) {
     byColorBB[static_cast<int>(us)].bb |= (1ULL << to_int);
     zobristKey ^= ZobristPiece[static_cast<int>(placed_piece)][to_int];
 
+    if (!accumulator_stale && !was_stale) {
+        update_accumulator_piece(*this, placed_piece, to, true);
+    }
+
     // --- En Passant capture ---
     if (flag == MOVE_FLAG_ENPASSANT) {
         const int captured_sq = to_int + (us == Color::WHITE ? -8 : 8);
@@ -152,6 +170,10 @@ bool Position::make_move(Move m) {
         board[captured_sq] = Piece::PIECE_NONE;
         byTypeBB[static_cast<int>(ep_pawn) % 6 + 1].bb &= ~(1ULL << captured_sq);
         byColorBB[static_cast<int>(them)].bb &= ~(1ULL << captured_sq);
+
+        if (!accumulator_stale && !was_stale) {
+            update_accumulator_piece(*this, ep_pawn, static_cast<Square>(captured_sq), false);
+        }
     }
 
     // --- Castling: move the rook ---

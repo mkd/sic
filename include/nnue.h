@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 #include <algorithm>
+#include "types.h"
+
 
 // ---------------------------------------------------------------------------
 //  HalfKP Dimensions
@@ -48,3 +50,8 @@ constexpr int32_t clipped_relu(int16_t x) {
 // ---------------------------------------------------------------------------
 class Position;
 void refresh_accumulator(Position& pos);
+
+// ---------------------------------------------------------------------------
+//  Incremental Accumulator Update
+// ---------------------------------------------------------------------------
+void update_accumulator_piece(Position& pos, Piece pc, Square sq, bool is_add);
