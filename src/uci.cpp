@@ -7,6 +7,7 @@
 #include "../include/timeman.h"
 #include "../include/tt.h"
 #include "../include/nnue.h"
+#include "../include/thread.h"
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -139,24 +140,20 @@ static void parse_go(const std::string& args) {
         int increment = (g_pos.sideToMove == Color::WHITE) ? winc : binc;
 
         if (movetime_ms > 0) {
-            // Exact move time (do NOT divide by 25)
             max_depth = 64;
             TimeManager::start_time = TimeManager::get_time_ms();
             TimeManager::allocated_time = movetime_ms;
             TimeManager::stop_search = false;
         } else {
-            // Sudden death tournament match (divide by 25)
             TimeManager::init_timer(time_left, increment);
         }
     } else {
-        // No time specified (e.g., 'go depth 17' or 'go infinite')
-        // Give the engine effectively infinite time so it only stops when depth is hit.
         TimeManager::start_time = TimeManager::get_time_ms();
         TimeManager::allocated_time = 999999999;
         TimeManager::stop_search = false;
     }
 
-    Move best = search_position(g_pos, max_depth);
+    Move best = ThreadPool::start_search(g_pos, max_depth);
     std::cout << "bestmove " << move_to_str(best) << std::endl;
     std::cout.flush();
 }
@@ -204,6 +201,8 @@ void uci_loop() {
 
             if (name == "EvalFile") {
                 load_nnue(value);
+            } else if (name == "Threads") {
+                ThreadPool::set_thread_count(std::stoi(value));
             }
         } else if (cmd == "position") {
             std::string rest;

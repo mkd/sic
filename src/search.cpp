@@ -3,14 +3,8 @@
 #include "../include/movegen.h"
 #include "../include/timeman.h"
 #include "../include/tt.h"
+#include "../include/thread.h"
 #include <iostream>
-
-// ---------------------------------------------------------------------------
-//  PV Table (triangular)
-// ---------------------------------------------------------------------------
-static Move pv_array[64][64];
-static int pv_length[64];
-static uint64_t node_count = 0;
 
 // ---------------------------------------------------------------------------
 //  Move Ordering (MVV-LVA + TT move)
@@ -57,11 +51,11 @@ static void sort_moves(const Position& pos, MoveList& list, Move tt_move) {
 // ---------------------------------------------------------------------------
 //  Quiescence Search
 // ---------------------------------------------------------------------------
-static Value quiescence(Position& pos, Value alpha, Value beta) {
+static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw) {
     if (TimeManager::stop_search) return 0;
 
-    node_count++;
-    if (!(node_count & 2047)) {
+    sw.node_count++;
+    if (!(sw.node_count & 2047)) {
         TimeManager::check_time();
         if (TimeManager::stop_search) return 0;
     }
@@ -82,7 +76,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta) {
         Position next_pos = pos;
         if (!next_pos.make_move(list.moves[i])) continue;
 
-        Value val = -quiescence(next_pos, -beta, -alpha);
+        Value val = -quiescence(next_pos, -beta, -alpha, sw);
 
         if (val >= beta) return beta;
         if (val > alpha) alpha = val;
@@ -94,19 +88,19 @@ static Value quiescence(Position& pos, Value alpha, Value beta) {
 // ---------------------------------------------------------------------------
 //  Negamax Search
 // ---------------------------------------------------------------------------
-static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null) {
-    pv_length[ply] = ply;
+static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null, SearchWorker& sw) {
+    sw.pv_length[ply] = ply;
 
     if (TimeManager::stop_search) return 0;
 
-    node_count++;
-    if (!(node_count & 2047)) {
+    sw.node_count++;
+    if (!(sw.node_count & 2047)) {
         TimeManager::check_time();
         if (TimeManager::stop_search) return 0;
     }
 
     if (depth == 0) {
-        return quiescence(pos, alpha, beta);
+        return quiescence(pos, alpha, beta, sw);
     }
 
     Move tt_move = MOVE_NONE;
@@ -121,7 +115,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
      && !pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove)) {
         Position null_pos = pos;
         null_pos.make_null_move();
-        Value null_val = -negamax(null_pos, depth - 3, ply + 1, -beta, -beta + 1, true);
+        Value null_val = -negamax(null_pos, depth - 3, ply + 1, -beta, -beta + 1, true, sw);
         if (null_val >= beta) return beta;
     }
 
@@ -143,23 +137,23 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         Value val;
 
         if (depth >= 3 && i >= 4 && is_quiet) {
-            val = -negamax(next_pos, depth - 2, ply + 1, -alpha - 1, -alpha, false);
+            val = -negamax(next_pos, depth - 2, ply + 1, -alpha - 1, -alpha, false, sw);
 
             if (val > alpha) {
-                val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false);
+                val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
             }
         } else {
-            val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false);
+            val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
         }
 
         if (val > best_value) {
             best_value = val;
             best_move = list.moves[i];
-            pv_array[ply][ply] = list.moves[i];
-            for (int j = ply + 1; j < pv_length[ply + 1]; ++j) {
-                pv_array[ply][j] = pv_array[ply + 1][j];
+            sw.pv_array[ply][ply] = list.moves[i];
+            for (int j = ply + 1; j < sw.pv_length[ply + 1]; ++j) {
+                sw.pv_array[ply][j] = sw.pv_array[ply + 1][j];
             }
-            pv_length[ply] = pv_length[ply + 1];
+            sw.pv_length[ply] = sw.pv_length[ply + 1];
         }
 
         if (val > alpha) {
@@ -181,12 +175,14 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 // ---------------------------------------------------------------------------
 //  Root Search (Iterative Deepening)
 // ---------------------------------------------------------------------------
-Move search_position(Position& pos, int max_depth) {
+Move search_position(Position& pos, int max_depth, int thread_id) {
     Move best_root_move = MOVE_NONE;
-    bool search_aborted = false;
+    SearchWorker sw;
 
     for (int d = 1; d <= max_depth; ++d) {
-        node_count = 0;
+        if (TimeManager::stop_search) break;
+
+        sw.node_count = 0;
 
         Value alpha = -VALUE_INFINITE;
         Value beta = VALUE_INFINITE;
@@ -201,44 +197,46 @@ Move search_position(Position& pos, int max_depth) {
             Position next_pos = pos;
             if (!next_pos.make_move(list.moves[i])) continue;
 
-            Value val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false);
+            Value val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw);
 
             if (val > best_value) {
                 best_value = val;
-                pv_array[0][0] = list.moves[i];
-                for (int j = 1; j < pv_length[1]; ++j) {
-                    pv_array[0][j] = pv_array[1][j];
+                sw.pv_array[0][0] = list.moves[i];
+                for (int j = 1; j < sw.pv_length[1]; ++j) {
+                    sw.pv_array[0][j] = sw.pv_array[1][j];
                 }
-                pv_length[0] = pv_length[1];
+                sw.pv_length[0] = sw.pv_length[1];
             }
             if (val > alpha) alpha = val;
         }
 
         if (TimeManager::stop_search) {
-            search_aborted = true;
             break;
         }
 
-        std::string pv_str;
-        for (int j = 0; j < pv_length[0]; ++j) {
-            pv_str += " " + move_to_str(pv_array[0][j]);
+        if (thread_id == 0) {
+            std::string pv_str;
+            for (int j = 0; j < sw.pv_length[0]; ++j) {
+                pv_str += " " + move_to_str(sw.pv_array[0][j]);
+            }
+
+            uint64_t elapsed = TimeManager::get_time_ms() - TimeManager::start_time;
+            uint64_t nps = (elapsed > 0) ? (sw.node_count * 1000) / elapsed : 0;
+
+            std::cout << "info depth " << d
+                      << " score cp " << best_value
+                      << " time " << elapsed
+                      << " nodes " << sw.node_count
+                      << " nps " << nps
+                      << " pv" << pv_str << std::endl;
         }
 
-        uint64_t elapsed = TimeManager::get_time_ms() - TimeManager::start_time;
-        uint64_t nps = (elapsed > 0) ? (node_count * 1000) / elapsed : 0;
-
-        std::cout << "info depth " << d
-                  << " score cp " << best_value
-                  << " time " << elapsed
-                  << " nodes " << node_count
-                  << " nps " << nps
-                  << " pv" << pv_str << std::endl;
-
-        best_root_move = pv_array[0][0];
+        best_root_move = sw.pv_array[0][0];
     }
 
-    (void)search_aborted;
+    if (thread_id == 0) {
+        std::cout.flush();
+    }
 
-    std::cout.flush();
     return best_root_move;
 }
