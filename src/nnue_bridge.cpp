@@ -74,9 +74,9 @@ int nnue_bridge_evaluate(
 }
 
 // ---------------------------------------------------------------------------
-//  Load NNUE network file
+//  Load dual NNUE network files (big + small)
 // ---------------------------------------------------------------------------
-void load_nnue(const std::string& filepath) {
-    nnue_init(filepath.c_str());
+void load_nnue(const std::string& bigPath, const std::string& smallPath) {
+    nnue_init_dual(bigPath.c_str(), smallPath.c_str());
     nnue_initialized = true;
 }

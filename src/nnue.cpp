@@ -1201,16 +1201,19 @@ enum {
 
 static bool verify_net(const void *evalData, size_t size)
 {
-  if (size != 21022697) return false;
+  if (size == 21022697) {
+    const char *d = (const char*)evalData;
+    if (readu_le_u32(d) != NnueVersion) return false;
+    if (readu_le_u32(d + 4) != 0x3e5aa6eeU) return false;
+    if (readu_le_u32(d + 8) != 177) return false;
+    if (readu_le_u32(d + TransformerStart) != 0x5d69d7b8) return false;
+    if (readu_le_u32(d + NetworkStart) != 0x63337156) return false;
+    return true;
+  }
 
-  const char *d = (const char*)evalData;
-  if (readu_le_u32(d) != NnueVersion) return false;
-  if (readu_le_u32(d + 4) != 0x3e5aa6eeU) return false;
-  if (readu_le_u32(d + 8) != 177) return false;
-  if (readu_le_u32(d + TransformerStart) != 0x5d69d7b8) return false;
-  if (readu_le_u32(d + NetworkStart) != 0x63337156) return false;
-
-  return true;
+  printf("Warning: Non-HalfKP network size detected (%zu bytes). Bypassing weight initialization to prevent segfault.\n", size);
+  fflush(stdout);
+  return false;
 }
 
 static void init_weights(const void *evalData)
@@ -1278,6 +1281,41 @@ DLLExport void _CDECL nnue_init(const char* evalFile)
 
   printf("NNUE file not found!\n");
   fflush(stdout);
+}
+
+DLLExport void _CDECL nnue_init_dual(const char* bigFile, const char* smallFile)
+{
+  bool bigOk = false, smallOk = false;
+
+  printf("Loading NNUE Big  : %s\n", bigFile ? bigFile : "(null)");
+  fflush(stdout);
+  if (bigFile && load_eval_file(bigFile)) {
+    printf("NNUE Big loaded !\n");
+    fflush(stdout);
+    bigOk = true;
+  } else if (bigFile) {
+    printf("NNUE Big file not found!\n");
+    fflush(stdout);
+  }
+
+  printf("Loading NNUE Small: %s\n", smallFile ? smallFile : "(null)");
+  fflush(stdout);
+  if (smallFile && load_eval_file(smallFile)) {
+    printf("NNUE Small loaded !\n");
+    fflush(stdout);
+    smallOk = true;
+  } else if (smallFile) {
+    printf("NNUE Small file not found!\n");
+    fflush(stdout);
+  }
+
+  if (bigOk || smallOk) {
+    printf("Dual NNUE ready (big=%d, small=%d)\n", bigOk, smallOk);
+    fflush(stdout);
+  } else {
+    printf("No NNUE network loaded!\n");
+    fflush(stdout);
+  }
 }
 
 DLLExport int _CDECL nnue_evaluate(

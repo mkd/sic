@@ -57,24 +57,24 @@ static FORCE_INLINE int pst_score(Bitboard pieces, const int table[64], bool is_
 // ---------------------------------------------------------------------------
 //  Sic Piece -> nnue-probe Piece Code Mapping
 //  Sic:   WP=0, WN=1, WB=2, WR=3, WQ=4, WK=5,
-//         BP=6, BN=7, BB=8, BR=9, BQ=10, BK=11
+//         BP=6, BN=7, BB=8, BR=9, BQ=10, BK=11, NONE=12
 //  nnue:  wpawn=6, wknight=5, wbishop=4, wrook=3, wqueen=2, wking=1,
-//         bpawn=12, bknight=11, bbishop=10, brook=9, bqueen=8, bking=7
+//         bpawn=12, bknight=11, bbishop=10, brook=9, bqueen=8, bking=7, blank=0
 // ---------------------------------------------------------------------------
 constexpr int SicToNnuePiece[13] = {
-    0,    // PIECE_NONE -> blank
-    6,    // WHITE_PAWN   -> wpawn
-    5,    // WHITE_KNIGHT -> wknight
-    4,    // WHITE_BISHOP -> wbishop
-    3,    // WHITE_ROOK   -> wrook
-    2,    // WHITE_QUEEN  -> wqueen
-    1,    // WHITE_KING   -> wking
-    12,   // BLACK_PAWN   -> bpawn
-    11,   // BLACK_KNIGHT -> bknight
-    10,   // BLACK_BISHOP -> bbishop
-    9,    // BLACK_ROOK   -> brook
-    8,    // BLACK_QUEEN  -> bqueen
-    7,    // BLACK_KING   -> bking
+    6,    // 0:  WHITE_PAWN   -> wpawn
+    5,    // 1:  WHITE_KNIGHT -> wknight
+    4,    // 2:  WHITE_BISHOP -> wbishop
+    3,    // 3:  WHITE_ROOK   -> wrook
+    2,    // 4:  WHITE_QUEEN  -> wqueen
+    1,    // 5:  WHITE_KING   -> wking
+    12,   // 6:  BLACK_PAWN   -> bpawn
+    11,   // 7:  BLACK_KNIGHT -> bknight
+    10,   // 8:  BLACK_BISHOP -> bbishop
+    9,    // 9:  BLACK_ROOK   -> brook
+    8,    // 10: BLACK_QUEEN  -> bqueen
+    7,    // 11: BLACK_KING   -> bking
+    0,    // 12: PIECE_NONE   -> blank
 };
 
 // ---------------------------------------------------------------------------

@@ -18,6 +18,12 @@
 static Position g_pos;
 
 // ---------------------------------------------------------------------------
+//  NNUE Network File Paths (dual-network SFNNv13)
+// ---------------------------------------------------------------------------
+static std::string eval_big   = "nn-b1a57edbea57.nnue";
+static std::string eval_small = "nn-baff1ede1f90.nnue";
+
+// ---------------------------------------------------------------------------
 //  Parse "position ..." command
 // ---------------------------------------------------------------------------
 static void parse_position(const std::string& args) {
@@ -164,6 +170,8 @@ static void parse_go(const std::string& args) {
 void uci_loop() {
     g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
+    load_nnue(eval_big, eval_small);
+
     std::string line;
 
     while (std::getline(std::cin, line)) {
@@ -200,7 +208,11 @@ void uci_loop() {
             }
 
             if (name == "EvalFile") {
-                load_nnue(value);
+                eval_big = value;
+                load_nnue(eval_big, eval_small);
+            } else if (name == "EvalFileSmall") {
+                eval_small = value;
+                load_nnue(eval_big, eval_small);
             } else if (name == "Threads") {
                 ThreadPool::set_thread_count(std::stoi(value));
             }
