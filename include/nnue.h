@@ -96,10 +96,18 @@ int nnue_evaluate_pos(Position* pos);
 **************************************************************************/
 
 /**
-* Load NNUE file
-*/
+ * Load NNUE file (single-network, legacy)
+ */
 DLLExport void _CDECL nnue_init(
   const char * evalFile             /** Path to NNUE file */
+);
+
+/**
+ * Load dual NNUE files (big + small networks for SFNNv13)
+ */
+DLLExport void _CDECL nnue_init_dual(
+  const char * bigFile,             /** Path to big NNUE file  */
+  const char * smallFile            /** Path to small NNUE file */
 );
 
 /**
