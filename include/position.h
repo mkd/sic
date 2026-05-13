@@ -34,7 +34,7 @@ enum CastlingSide : int {
 //  Defined at namespace scope so nnue_bridge.h can reference them.
 // ---------------------------------------------------------------------------
 struct NNUEAccumulator {
-    alignas(64) int16_t accumulation[2][256];
+    alignas(64) int16_t accumulation[2][3072];
     int computedAccumulation;
 };
 
