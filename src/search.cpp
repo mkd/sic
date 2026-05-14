@@ -127,6 +127,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     Move best_move = MOVE_NONE;
     TTFlag flag = TT_ALPHA;
 
+    bool bSearchPv = true;
+
     for (int i = 0; i < list.size(); ++i) {
         Position next_pos = pos;
         if (!next_pos.make_move(list.moves[i])) continue;
@@ -136,14 +138,21 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
         Value val;
 
-        if (depth >= 3 && i >= 4 && is_quiet) {
-            val = -negamax(next_pos, depth - 2, ply + 1, -alpha - 1, -alpha, false, sw);
+        if (bSearchPv) {
+            val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
+        } else {
+            if (depth >= 3 && i >= 4 && is_quiet) {
+                val = -negamax(next_pos, depth - 2, ply + 1, -alpha - 1, -alpha, false, sw);
+                if (val > alpha) {
+                    val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw);
+                }
+            } else {
+                val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw);
+            }
 
-            if (val > alpha) {
+            if (val > alpha && val < beta) {
                 val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
             }
-        } else {
-            val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
         }
 
         if (val > best_value) {
@@ -159,6 +168,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (val > alpha) {
             alpha = val;
             flag = TT_EXACT;
+            bSearchPv = false;
         }
 
         if (alpha >= beta) {
@@ -193,11 +203,21 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
 
         Value best_value = -VALUE_INFINITE;
 
+        bool bSearchPv = true;
+
         for (int i = 0; i < list.size(); ++i) {
             Position next_pos = pos;
             if (!next_pos.make_move(list.moves[i])) continue;
 
-            Value val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw);
+            Value val;
+            if (bSearchPv) {
+                val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw);
+            } else {
+                val = -negamax(next_pos, d - 1, 1, -alpha - 1, -alpha, false, sw);
+                if (val > alpha) {
+                    val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw);
+                }
+            }
 
             if (val > best_value) {
                 best_value = val;
@@ -207,7 +227,10 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
                 }
                 sw.pv_length[0] = sw.pv_length[1];
             }
-            if (val > alpha) alpha = val;
+            if (val > alpha) {
+                alpha = val;
+                bSearchPv = false;
+            }
         }
 
         if (TimeManager::stop_search) {
