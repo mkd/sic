@@ -5,6 +5,11 @@ TTEntry* TT = nullptr;
 size_t TT_SIZE = 0;
 
 void init_tt(size_t mb_size) {
+    if (TT != nullptr) {
+        operator delete(TT, std::align_val_t(16));
+    }
+    if (mb_size < 1) mb_size = 1;
+
     TT_SIZE = mb_size * (1 << 20) / sizeof(TTEntry);
     TT = static_cast<TTEntry*>(operator new(TT_SIZE * sizeof(TTEntry), std::align_val_t(16)));
     clear_tt();

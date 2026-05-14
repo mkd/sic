@@ -183,12 +183,18 @@ void uci_loop() {
         if (cmd == "uci") {
             std::cout << "id name Sic" << std::endl;
             std::cout << "id author Claudio M. Camacho <claudiomkd@gmail.com>" << std::endl;
+            std::cout << "option name Hash type spin default 1024 min 1 max 131072" << std::endl;
+            std::cout << "option name Clear Hash type button" << std::endl;
+            std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
             std::cout << "uciok" << std::endl;
         } else if (cmd == "isready") {
             std::cout << "readyok" << std::endl;
         } else if (cmd == "ucinewgame") {
             TimeManager::stop_search = false;
             clear_tt();
+            std::cout << "option name Hash type spin default 1024 min 1 max 131072" << std::endl;
+            std::cout << "option name Clear Hash type button" << std::endl;
+            std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
         } else if (cmd == "setoption") {
             std::string rest;
             std::getline(iss, rest);
@@ -198,11 +204,23 @@ void uci_loop() {
 
             std::istringstream opt_iss(rest);
             std::string token;
+            bool reading_name = false;
+            bool reading_value = false;
             while (opt_iss >> token) {
                 if (token == "name") {
-                    opt_iss >> name;
+                    reading_name = true;
+                    reading_value = false;
+                    name.clear();
                 } else if (token == "value") {
-                    opt_iss >> value;
+                    reading_value = true;
+                    reading_name = false;
+                    value.clear();
+                } else if (reading_name) {
+                    if (!name.empty()) name += ' ';
+                    name += token;
+                } else if (reading_value) {
+                    if (!value.empty()) value += ' ';
+                    value += token;
                 }
             }
 
@@ -211,6 +229,10 @@ void uci_loop() {
                 load_nnue(evalFile);
             } else if (name == "Threads") {
                 ThreadPool::set_thread_count(std::stoi(value));
+            } else if (name == "Hash") {
+                init_tt(std::stoi(value));
+            } else if (name == "Clear Hash") {
+                clear_tt();
             }
         } else if (cmd == "position") {
             std::string rest;

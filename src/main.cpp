@@ -8,7 +8,7 @@
 int main() {
     init_attacks();
     init_zobrist();
-    init_tt(16);
+    init_tt(1024);
     init_lmr();
     ThreadPool::init();
     uci_loop();

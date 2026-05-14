@@ -4,6 +4,7 @@
 #include "../include/timeman.h"
 #include "../include/tt.h"
 #include "../include/thread.h"
+#include "../include/attacks.h"
 #include <cstdlib>
 #include <cmath>
 #include <algorithm>
@@ -74,6 +75,73 @@ static void sort_moves(const Position& pos, MoveList& list, Move tt_move, const 
 }
 
 // ---------------------------------------------------------------------------
+//  SEE Helpers
+// ---------------------------------------------------------------------------
+static Bitboard get_attackers(const Position& pos, Square sq, Bitboard occupied) {
+    int sq_idx = static_cast<int>(sq);
+    Bitboard attackers = {0};
+
+    attackers.bb |= (PAWN_ATTACKS[static_cast<int>(Color::BLACK)][sq_idx].bb & pos.pieces(Color::WHITE).bb & pos.pieces(PieceType::PAWN).bb);
+    attackers.bb |= (PAWN_ATTACKS[static_cast<int>(Color::WHITE)][sq_idx].bb & pos.pieces(Color::BLACK).bb & pos.pieces(PieceType::PAWN).bb);
+    attackers.bb |= (KNIGHT_ATTACKS[sq_idx].bb & pos.pieces(PieceType::KNIGHT).bb);
+    attackers.bb |= (KING_ATTACKS[sq_idx].bb & pos.pieces(PieceType::KING).bb);
+    attackers.bb |= (get_bishop_attacks(sq, occupied).bb & (pos.pieces(PieceType::BISHOP).bb | pos.pieces(PieceType::QUEEN).bb));
+    attackers.bb |= (get_rook_attacks(sq, occupied).bb & (pos.pieces(PieceType::ROOK).bb | pos.pieces(PieceType::QUEEN).bb));
+
+    return {attackers.bb & occupied.bb};
+}
+
+static bool see_ge(const Position& pos, Move m, int threshold) {
+    Square from = move_from(m);
+    Square to = move_to(m);
+    int swap_val = PieceValues[static_cast<int>(piece_type(pos.piece_on(to)))] - threshold;
+    if (swap_val < 0) return false;
+
+    PieceType attacker_type = piece_type(pos.piece_on(from));
+    if (move_prom(m) != PieceType::NONE) attacker_type = move_prom(m);
+    swap_val -= PieceValues[static_cast<int>(attacker_type)];
+    if (swap_val >= 0) return true;
+
+    Bitboard occupied = pos.occupied();
+    occupied.bb ^= (1ULL << static_cast<int>(from));
+
+    if (piece_type(pos.piece_on(to)) == PieceType::NONE && attacker_type == PieceType::PAWN) {
+        Square ep_sq = pos.sideToMove == Color::WHITE ? static_cast<Square>(static_cast<int>(to) - 8) : static_cast<Square>(static_cast<int>(to) + 8);
+        occupied.bb ^= (1ULL << static_cast<int>(ep_sq));
+        swap_val += PieceValues[static_cast<int>(PieceType::PAWN)];
+    }
+
+    Bitboard attackers = get_attackers(pos, to, occupied);
+    Color us = ~pos.sideToMove;
+
+    while (true) {
+        Bitboard our_attackers = {attackers.bb & pos.pieces(us).bb};
+        if (our_attackers.bb == 0) break;
+
+        PieceType pt = PieceType::NONE;
+        for (int i = 1; i <= 6; ++i) {
+            if (our_attackers.bb & pos.pieces(static_cast<PieceType>(i)).bb) {
+                pt = static_cast<PieceType>(i);
+                break;
+            }
+        }
+
+        Square atk_sq = lsb({our_attackers.bb & pos.pieces(pt).bb});
+        occupied.bb ^= (1ULL << static_cast<int>(atk_sq));
+        attackers.bb &= ~(1ULL << static_cast<int>(atk_sq));
+
+        if (pt == PieceType::PAWN || pt == PieceType::BISHOP || pt == PieceType::ROOK || pt == PieceType::QUEEN) {
+            attackers.bb |= get_attackers(pos, to, occupied).bb;
+        }
+
+        swap_val = -swap_val - 1 - PieceValues[static_cast<int>(pt)];
+        us = ~us;
+        if (swap_val >= 0) return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 //  Quiescence Search
 // ---------------------------------------------------------------------------
 static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw) {
@@ -97,6 +165,8 @@ static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw
     for (int i = 0; i < list.size(); ++i) {
         if (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
          && move_prom(list.moves[i]) == PieceType::NONE) continue;
+
+        if (!see_ge(pos, list.moves[i], 0)) continue;
 
         Position next_pos = pos;
         if (!next_pos.make_move(list.moves[i])) continue;
