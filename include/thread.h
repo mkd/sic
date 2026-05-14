@@ -9,6 +9,7 @@ struct SearchWorker {
     Move pv_array[64][64];
     int  pv_length[64];
     uint64_t node_count;
+    Move killer_moves[128][2];
 
     SearchWorker() : node_count(0) {
         for (int i = 0; i < 64; ++i) {
@@ -16,6 +17,10 @@ struct SearchWorker {
             for (int j = 0; j < 64; ++j) {
                 pv_array[i][j] = MOVE_NONE;
             }
+        }
+        for (int i = 0; i < 128; ++i) {
+            killer_moves[i][0] = MOVE_NONE;
+            killer_moves[i][1] = MOVE_NONE;
         }
     }
 };

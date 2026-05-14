@@ -7,9 +7,9 @@
 #include <iostream>
 
 // ---------------------------------------------------------------------------
-//  Move Ordering (MVV-LVA + TT move)
+//  Move Ordering (MVV-LVA + TT move + Killer Moves)
 // ---------------------------------------------------------------------------
-static int score_move(const Position& pos, Move m, Move tt_move) {
+static int score_move(const Position& pos, Move m, Move tt_move, const SearchWorker& sw, int ply) {
     if (m == tt_move) return 2000000;
 
     Piece victim = pos.piece_on(move_to(m));
@@ -18,8 +18,11 @@ static int score_move(const Position& pos, Move m, Move tt_move) {
     if (victim != Piece::PIECE_NONE) {
         int v = static_cast<int>(piece_type(victim));
         int a = static_cast<int>(piece_type(attacker));
-        return 10 * PieceValues[v] - PieceValues[a];
+        return 1000000 + 10 * PieceValues[v] - PieceValues[a];
     }
+
+    if (m == sw.killer_moves[ply][0]) return 900000;
+    if (m == sw.killer_moves[ply][1]) return 800000;
 
     if (move_prom(m) != PieceType::NONE) {
         return PieceValues[static_cast<int>(move_prom(m))];
@@ -28,10 +31,10 @@ static int score_move(const Position& pos, Move m, Move tt_move) {
     return 0;
 }
 
-static void sort_moves(const Position& pos, MoveList& list, Move tt_move) {
+static void sort_moves(const Position& pos, MoveList& list, Move tt_move, const SearchWorker& sw, int ply) {
     int scores[MAX_MOVES];
     for (int i = 0; i < list.size(); ++i) {
-        scores[i] = score_move(pos, list.moves[i], tt_move);
+        scores[i] = score_move(pos, list.moves[i], tt_move, sw, ply);
     }
 
     for (int i = 1; i < list.size(); ++i) {
@@ -67,7 +70,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw
 
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
-    sort_moves(pos, list, MOVE_NONE);
+    sort_moves(pos, list, MOVE_NONE, sw, 0);
 
     for (int i = 0; i < list.size(); ++i) {
         if (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
@@ -121,13 +124,13 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
-    sort_moves(pos, list, tt_move);
+    sort_moves(pos, list, tt_move, sw, ply);
 
     Value best_value = -VALUE_INFINITE;
     Move best_move = MOVE_NONE;
     TTFlag flag = TT_ALPHA;
 
-    bool bSearchPv = true;
+    int legal_moves = 0;
 
     for (int i = 0; i < list.size(); ++i) {
         Position next_pos = pos;
@@ -138,10 +141,10 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
         Value val;
 
-        if (bSearchPv) {
+        if (legal_moves == 0) {
             val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
         } else {
-            if (depth >= 3 && i >= 4 && is_quiet) {
+            if (depth >= 3 && legal_moves >= 4 && is_quiet) {
                 val = -negamax(next_pos, depth - 2, ply + 1, -alpha - 1, -alpha, false, sw);
                 if (val > alpha) {
                     val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw);
@@ -168,14 +171,19 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (val > alpha) {
             alpha = val;
             flag = TT_EXACT;
-            bSearchPv = false;
         }
 
         if (alpha >= beta) {
             flag = TT_BETA;
+            if (is_quiet && list.moves[i] != sw.killer_moves[ply][0]) {
+                sw.killer_moves[ply][1] = sw.killer_moves[ply][0];
+                sw.killer_moves[ply][0] = list.moves[i];
+            }
             best_move = list.moves[i];
             break;
         }
+
+        legal_moves++;
     }
 
     record_tt(pos.zobristKey, depth, best_value, flag, best_move);
@@ -199,18 +207,18 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
 
         MoveList list;
         MoveGen::generate_legal_moves(pos, list);
-        sort_moves(pos, list, MOVE_NONE);
+        sort_moves(pos, list, MOVE_NONE, sw, 0);
 
         Value best_value = -VALUE_INFINITE;
 
-        bool bSearchPv = true;
+        int legal_moves = 0;
 
         for (int i = 0; i < list.size(); ++i) {
             Position next_pos = pos;
             if (!next_pos.make_move(list.moves[i])) continue;
 
             Value val;
-            if (bSearchPv) {
+            if (legal_moves == 0) {
                 val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw);
             } else {
                 val = -negamax(next_pos, d - 1, 1, -alpha - 1, -alpha, false, sw);
@@ -229,8 +237,9 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
             }
             if (val > alpha) {
                 alpha = val;
-                bSearchPv = false;
             }
+
+            legal_moves++;
         }
 
         if (TimeManager::stop_search) {
