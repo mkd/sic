@@ -128,16 +128,25 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         return quiescence(pos, alpha, beta, sw);
     }
 
+    bool in_check = pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove);
+    Value static_eval = evaluate(pos);
+
     Move tt_move = MOVE_NONE;
     Value tt_score;
     if (ply > 0 && probe_tt(pos.zobristKey, depth, alpha, beta, tt_score, tt_move)) {
         return tt_score;
     }
 
+    // Reverse Futility Pruning (Static NMP)
+    if (!is_null && depth <= 5 && !in_check && abs(beta) < VALUE_MATE - 1000) {
+        int rfp_margin = depth * 75;
+        if (static_eval - rfp_margin >= beta) {
+            return static_eval;
+        }
+    }
+
     // Null Move Pruning
-    if (!is_null && depth >= 3 && ply > 0
-     && evaluate(pos) >= beta
-     && !pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove)) {
+    if (!is_null && depth >= 3 && ply > 0 && static_eval >= beta && !in_check) {
         Position null_pos = pos;
         null_pos.make_null_move();
         Value null_val = -negamax(null_pos, depth - 3, ply + 1, -beta, -beta + 1, true, sw);
@@ -163,6 +172,15 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         bool is_quiet = (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
                       && move_prom(list.moves[i]) == PieceType::NONE);
 
+        // Futility Pruning
+        bool is_killer = (list.moves[i] == sw.killer_moves[ply][0] || list.moves[i] == sw.killer_moves[ply][1]);
+        if (depth <= 4 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 1000) {
+            int fp_margin = depth * 100 + 100;
+            if (static_eval + fp_margin <= alpha) {
+                continue;
+            }
+        }
+
         if (is_quiet) {
             quiets_searched[quiet_count++] = list.moves[i];
         }
@@ -172,7 +190,6 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (legal_moves == 0) {
             val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
         } else {
-            bool is_killer = (list.moves[i] == sw.killer_moves[ply][0] || list.moves[i] == sw.killer_moves[ply][1]);
             if (depth >= 3 && legal_moves >= 4 && is_quiet && !is_killer) {
                 int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
                 int reduced_depth = std::max(1, depth - 1 - reduction);
@@ -299,11 +316,12 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
             uint64_t nps = (elapsed > 0) ? (sw.node_count * 1000) / elapsed : 0;
 
             std::cout << "info depth " << d
-                      << " score cp " << best_value
-                      << " time " << elapsed
-                      << " nodes " << sw.node_count
-                      << " nps " << nps
-                      << " pv" << pv_str << std::endl;
+                       << " score cp " << best_value
+                       << " time " << elapsed
+                       << " nodes " << sw.node_count
+                       << " nps " << nps
+                       << " hashfull " << get_hashfull()
+                       << " pv" << pv_str << std::endl;
         }
 
         best_root_move = sw.pv_array[0][0];

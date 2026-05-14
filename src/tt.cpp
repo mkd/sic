@@ -47,3 +47,12 @@ bool probe_tt(uint64_t key, int depth, int alpha, int beta, Value& return_score,
 
     return false;
 }
+
+int get_hashfull() {
+    int count = 0;
+    int max_samples = TT_SIZE < 1000 ? TT_SIZE : 1000;
+    for (int i = 0; i < max_samples; ++i) {
+        if (TT[i].key != 0) count++;
+    }
+    return (count * 1000) / max_samples;
+}
