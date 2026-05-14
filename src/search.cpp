@@ -4,6 +4,7 @@
 #include "../include/timeman.h"
 #include "../include/tt.h"
 #include "../include/thread.h"
+#include <cstdlib>
 #include <iostream>
 
 // ---------------------------------------------------------------------------
@@ -28,7 +29,8 @@ static int score_move(const Position& pos, Move m, Move tt_move, const SearchWor
         return PieceValues[static_cast<int>(move_prom(m))];
     }
 
-    return 0;
+    int hist_score = sw.history[static_cast<int>(pos.sideToMove)][static_cast<int>(move_from(m))][static_cast<int>(move_to(m))];
+    return hist_score < 700000 ? hist_score : 700000;
 }
 
 static void sort_moves(const Position& pos, MoveList& list, Move tt_move, const SearchWorker& sw, int ply) {
@@ -131,6 +133,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     TTFlag flag = TT_ALPHA;
 
     int legal_moves = 0;
+    Move quiets_searched[MAX_MOVES];
+    int quiet_count = 0;
 
     for (int i = 0; i < list.size(); ++i) {
         Position next_pos = pos;
@@ -138,6 +142,10 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
         bool is_quiet = (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
                       && move_prom(list.moves[i]) == PieceType::NONE);
+
+        if (is_quiet) {
+            quiets_searched[quiet_count++] = list.moves[i];
+        }
 
         Value val;
 
@@ -175,9 +183,21 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
         if (alpha >= beta) {
             flag = TT_BETA;
-            if (is_quiet && list.moves[i] != sw.killer_moves[ply][0]) {
-                sw.killer_moves[ply][1] = sw.killer_moves[ply][0];
-                sw.killer_moves[ply][0] = list.moves[i];
+            if (is_quiet) {
+                if (list.moves[i] != sw.killer_moves[ply][0]) {
+                    sw.killer_moves[ply][1] = sw.killer_moves[ply][0];
+                    sw.killer_moves[ply][0] = list.moves[i];
+                }
+                int bonus = depth * depth;
+                int us = static_cast<int>(pos.sideToMove);
+                int from = static_cast<int>(move_from(list.moves[i]));
+                int to = static_cast<int>(move_to(list.moves[i]));
+                sw.history[us][from][to] += bonus - sw.history[us][from][to] * abs(bonus) / 16384;
+                for (int q = 0; q < quiet_count - 1; ++q) {
+                    int q_from = static_cast<int>(move_from(quiets_searched[q]));
+                    int q_to = static_cast<int>(move_to(quiets_searched[q]));
+                    sw.history[us][q_from][q_to] -= bonus + sw.history[us][q_from][q_to] * abs(bonus) / 16384;
+                }
             }
             best_move = list.moves[i];
             break;
