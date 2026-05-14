@@ -5,7 +5,27 @@
 #include "../include/tt.h"
 #include "../include/thread.h"
 #include <cstdlib>
+#include <cmath>
+#include <algorithm>
 #include <iostream>
+
+// ---------------------------------------------------------------------------
+//  LMR Table
+// ---------------------------------------------------------------------------
+int LMRTable[64][64];
+
+void init_lmr() {
+    for (int d = 0; d < 64; ++d) {
+        for (int m = 0; m < 64; ++m) {
+            if (d >= 3 && m >= 4) {
+                double reduction = 0.75 + std::log(d) * std::log(m) / 2.25;
+                LMRTable[d][m] = static_cast<int>(reduction);
+            } else {
+                LMRTable[d][m] = 0;
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 //  Move Ordering (MVV-LVA + TT move + Killer Moves)
@@ -152,9 +172,12 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (legal_moves == 0) {
             val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
         } else {
-            if (depth >= 3 && legal_moves >= 4 && is_quiet) {
-                val = -negamax(next_pos, depth - 2, ply + 1, -alpha - 1, -alpha, false, sw);
-                if (val > alpha) {
+            bool is_killer = (list.moves[i] == sw.killer_moves[ply][0] || list.moves[i] == sw.killer_moves[ply][1]);
+            if (depth >= 3 && legal_moves >= 4 && is_quiet && !is_killer) {
+                int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
+                int reduced_depth = std::max(1, depth - 1 - reduction);
+                val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw);
+                if (val > alpha && reduced_depth < depth - 1) {
                     val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw);
                 }
             } else {
