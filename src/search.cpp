@@ -200,6 +200,12 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
     bool in_check = pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove);
     Value static_eval = evaluate(pos);
+    sw.static_evals[ply] = static_eval;
+
+    bool improving = false;
+    if (ply >= 2 && !in_check) {
+        improving = (static_eval >= sw.static_evals[ply - 2]);
+    }
 
     Move tt_move = MOVE_NONE;
     Value tt_score;
@@ -209,7 +215,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
     // Reverse Futility Pruning (Static NMP)
     if (!is_null && depth <= 5 && !in_check && abs(beta) < VALUE_MATE - 1000) {
-        int rfp_margin = depth * 75;
+        int rfp_margin = improving ? depth * 75 : depth * 100;
         if (static_eval - rfp_margin >= beta) {
             return static_eval;
         }
@@ -221,6 +227,11 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         null_pos.make_null_move();
         Value null_val = -negamax(null_pos, depth - 3, ply + 1, -beta, -beta + 1, true, sw);
         if (null_val >= beta) return beta;
+    }
+
+    // Internal Iterative Reductions (IIR)
+    if (depth >= 4 && tt_move == MOVE_NONE) {
+        depth--;
     }
 
     MoveList list;
@@ -279,6 +290,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         } else {
             if (depth >= 3 && legal_moves >= 4 && is_quiet && !is_killer) {
                 int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
+                if (!improving) reduction++;
                 int reduced_depth = std::max(1, depth - 1 - reduction);
                 val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw);
                 if (val > alpha && reduced_depth < depth - 1) {

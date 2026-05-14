@@ -11,6 +11,7 @@ struct SearchWorker {
     uint64_t node_count;
     Move killer_moves[128][2];
     int history[2][64][64];
+    Value static_evals[128];
 
     SearchWorker() : node_count(0) {
         for (int i = 0; i < 64; ++i) {
