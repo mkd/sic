@@ -34,7 +34,7 @@ enum CastlingSide : int {
 //  Defined at namespace scope so nnue_bridge.h can reference them.
 // ---------------------------------------------------------------------------
 struct NNUEAccumulator {
-    alignas(64) int16_t accumulation[2][3072];
+    alignas(64) int16_t accumulation[2][256];
     int computedAccumulation;
 };
 
@@ -64,6 +64,10 @@ public:
     int halfmoveClock;
     int fullmoveNumber;
     uint64_t zobristKey;
+
+    Bitboard checkers;
+    Bitboard blockersForKing[2];
+    Bitboard pinners[2];
 
     NNUEState nnueState;
     NNUEState* nnueStatePlyMinus1;
@@ -117,4 +121,10 @@ public:
     // -----------------------------------------------------------------------
     bool make_move(Move m);
     void make_null_move();
+
+    // -----------------------------------------------------------------------
+    //  Check / Pin Information
+    // -----------------------------------------------------------------------
+    Bitboard slider_blockers(Bitboard sliders, Square s, Bitboard& pinners) const;
+    void set_check_info();
 };

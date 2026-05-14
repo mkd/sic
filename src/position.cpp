@@ -9,6 +9,25 @@
 #include <cstring>
 
 // ---------------------------------------------------------------------------
+//  Sic-to-NNUE piece index mapping for HalfKP accumulator updates
+// ---------------------------------------------------------------------------
+constexpr int SicToNnuePiece[13] = {
+    6,  // 0: WHITE_PAWN   -> wpawn
+    5,  // 1: WHITE_KNIGHT -> wknight
+    4,  // 2: WHITE_BISHOP -> wbishop
+    3,  // 3: WHITE_ROOK   -> wrook
+    2,  // 4: WHITE_QUEEN  -> wqueen
+    1,  // 5: WHITE_KING   -> wking
+    12, // 6: BLACK_PAWN   -> bpawn
+    11, // 7: BLACK_KNIGHT -> bknight
+    10, // 8: BLACK_BISHOP -> bbishop
+    9,  // 9: BLACK_ROOK   -> brook
+    8,  // 10: BLACK_QUEEN  -> bqueen
+    7,  // 11: BLACK_KING   -> bking
+    0   // 12: PIECE_NONE   -> blank
+};
+
+// ---------------------------------------------------------------------------
 //  Zobrist Hashing Tables
 // ---------------------------------------------------------------------------
 uint64_t ZobristPiece[12][64];
@@ -100,6 +119,116 @@ bool Position::is_attacked(Square sq, Color attacker) const {
 }
 
 // ---------------------------------------------------------------------------
+//  Slider Blockers / Pinners
+// ---------------------------------------------------------------------------
+Bitboard Position::slider_blockers(Bitboard sliders, Square s, Bitboard& pinners) const {
+    Bitboard blockers = {0};
+    pinners = {0};
+
+    const Bitboard occ = occupied();
+
+    // --- Rook-type sliders (Rooks + Queens) ---
+    {
+        const Bitboard rookSliders = sliders & (pieces(PieceType::ROOK) | pieces(PieceType::QUEEN));
+        const Bitboard rookLines = get_rook_attacks(s, {0});
+        Bitboard rAttackers = rookSliders & rookLines;
+
+        while (rAttackers.bb) {
+            const Square sliderSq = pop_lsb(rAttackers);
+            const Bitboard ray = get_rook_attacks(s, occ) & get_rook_attacks(sliderSq, occ);
+            const Bitboard between = ray & occ;
+
+            if (between.bb && !(between.bb & (between.bb - 1))) {
+                blockers |= between;
+                pinners.bb |= (1ULL << static_cast<int>(sliderSq));
+            }
+        }
+    }
+
+    // --- Bishop-type sliders (Bishops + Queens) ---
+    {
+        const Bitboard bishopSliders = sliders & (pieces(PieceType::BISHOP) | pieces(PieceType::QUEEN));
+        const Bitboard bishopLines = get_bishop_attacks(s, {0});
+        Bitboard bAttackers = bishopSliders & bishopLines;
+
+        while (bAttackers.bb) {
+            const Square sliderSq = pop_lsb(bAttackers);
+            const Bitboard ray = get_bishop_attacks(s, occ) & get_bishop_attacks(sliderSq, occ);
+            const Bitboard between = ray & occ;
+
+            if (between.bb && !(between.bb & (between.bb - 1))) {
+                blockers |= between;
+                pinners.bb |= (1ULL << static_cast<int>(sliderSq));
+            }
+        }
+    }
+
+    return blockers;
+}
+
+// ---------------------------------------------------------------------------
+//  Set Check Info
+// ---------------------------------------------------------------------------
+void Position::set_check_info() {
+    // --- Populate blockers and pinners for each side ---
+    blockersForKing[static_cast<int>(Color::WHITE)] = slider_blockers(
+        pieces(Color::BLACK), get_king_square(Color::WHITE), pinners[static_cast<int>(Color::WHITE)]);
+
+    blockersForKing[static_cast<int>(Color::BLACK)] = slider_blockers(
+        pieces(Color::WHITE), get_king_square(Color::BLACK), pinners[static_cast<int>(Color::BLACK)]);
+
+    // --- Compute checkers for the side to move ---
+    const Color us = sideToMove;
+    const Color them = ~us;
+    const Square kingSq = get_king_square(us);
+    const Bitboard occ = occupied();
+
+    Bitboard checkersAttackers = {0};
+
+    // Knight checkers
+    {
+        const Bitboard knights = pieces(them) & pieces(PieceType::KNIGHT);
+        if (knights.bb) {
+            checkersAttackers |= (KNIGHT_ATTACKS[static_cast<int>(kingSq)] & knights);
+        }
+    }
+
+    // Pawn checkers
+    {
+        const Bitboard pawns = pieces(them) & pieces(PieceType::PAWN);
+        if (pawns.bb) {
+            checkersAttackers |= (PAWN_ATTACKS[static_cast<int>(us)][static_cast<int>(kingSq)] & pawns);
+        }
+    }
+
+    // King checkers
+    {
+        const Bitboard kings = pieces(them) & pieces(PieceType::KING);
+        if (kings.bb) {
+            checkersAttackers |= (KING_ATTACKS[static_cast<int>(kingSq)] & kings);
+        }
+    }
+
+    // Bishop/Queen checkers (diagonal sliders that have a clear line)
+    {
+        const Bitboard diagSliders = pieces(them) & (pieces(PieceType::BISHOP) | pieces(PieceType::QUEEN));
+        if (diagSliders.bb) {
+            checkersAttackers |= (get_bishop_attacks(kingSq, occ) & diagSliders);
+        }
+    }
+
+    // Rook/Queen checkers (orthogonal sliders that have a clear line)
+    {
+        const Bitboard orthSliders = pieces(them) & (pieces(PieceType::ROOK) | pieces(PieceType::QUEEN));
+        if (orthSliders.bb) {
+            checkersAttackers |= (get_rook_attacks(kingSq, occ) & orthSliders);
+        }
+    }
+
+    checkers = checkersAttackers;
+}
+
+// ---------------------------------------------------------------------------
 //  Make Move (with legality check)
 // ---------------------------------------------------------------------------
 bool Position::make_move(Move m) {
@@ -116,9 +245,14 @@ bool Position::make_move(Move m) {
     const Color us = sideToMove;
     const Color them = ~us;
 
-    // --- NNUE: mark stale if king moves ---
-    if (piece_type(moving_piece) == PieceType::KING) {
+    // --- NNUE: mark stale on complex moves ---
+    if (piece_type(moving_piece) == PieceType::KING ||
+        flag == MOVE_FLAG_CASTLING ||
+        flag == MOVE_FLAG_ENPASSANT ||
+        prom != PieceType::NONE) {
         nnueStale = true;
+    } else {
+        nnueStale = false;
     }
 
     // --- NNUE: track dirty pieces for incremental update ---
@@ -127,14 +261,14 @@ bool Position::make_move(Move m) {
     int dirtyNum = 0;
     if (!nnueStale) {
         // Removing piece from 'from'
-        nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(moving_piece) + 1;
+        nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(moving_piece)];
         nnueState.dirtyPiece.from[dirtyNum] = from_int;
         nnueState.dirtyPiece.to[dirtyNum] = 64;
         dirtyNum++;
 
         // If capture, removing piece from 'to'
         if (captured_piece != Piece::PIECE_NONE) {
-            nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(captured_piece) + 1;
+            nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(captured_piece)];
             nnueState.dirtyPiece.from[dirtyNum] = to_int;
             nnueState.dirtyPiece.to[dirtyNum] = 64;
             dirtyNum++;
@@ -142,7 +276,7 @@ bool Position::make_move(Move m) {
 
         // Placing piece on 'to'
         Piece placed_piece = (prom != PieceType::NONE) ? make_piece(us, prom) : moving_piece;
-        nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(placed_piece) + 1;
+        nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(placed_piece)];
         nnueState.dirtyPiece.from[dirtyNum] = 64;
         nnueState.dirtyPiece.to[dirtyNum] = to_int;
         dirtyNum++;
@@ -181,7 +315,7 @@ bool Position::make_move(Move m) {
         byColorBB[static_cast<int>(them)].bb &= ~(1ULL << captured_sq);
 
         if (!nnueStale) {
-            nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(ep_pawn) + 1;
+            nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(ep_pawn)];
             nnueState.dirtyPiece.from[dirtyNum] = captured_sq;
             nnueState.dirtyPiece.to[dirtyNum] = 64;
             dirtyNum++;
@@ -213,11 +347,11 @@ bool Position::make_move(Move m) {
             zobristKey ^= ZobristPiece[static_cast<int>(rookPiece)][rookTo];
 
             if (!nnueStale) {
-                nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(rookPiece) + 1;
+                nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(rookPiece)];
                 nnueState.dirtyPiece.from[dirtyNum] = rookFrom;
                 nnueState.dirtyPiece.to[dirtyNum] = 64;
                 dirtyNum++;
-                nnueState.dirtyPiece.pc[dirtyNum] = static_cast<int>(rookPiece) + 1;
+                nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(rookPiece)];
                 nnueState.dirtyPiece.from[dirtyNum] = 64;
                 nnueState.dirtyPiece.to[dirtyNum] = rookTo;
                 dirtyNum++;
@@ -250,6 +384,9 @@ bool Position::make_move(Move m) {
     // --- Swap side to move ---
     zobristKey ^= ZobristSide;
     sideToMove = them;
+
+    // --- Update check/pin info for the new position ---
+    set_check_info();
 
     // --- Legality check: is the king of the side that just moved in check? ---
     const Square our_king = get_king_square(us);
@@ -358,4 +495,6 @@ void Position::set_fen(const std::string& fen) {
     fullmoveNumber = std::stoi(token);
 
     nnueStale = true;
+
+    set_check_info();
 }

@@ -103,14 +103,6 @@ DLLExport void _CDECL nnue_init(
 );
 
 /**
- * Load dual NNUE files (big + small networks for SFNNv13)
- */
-DLLExport void _CDECL nnue_init_dual(
-  const char * bigFile,             /** Path to big NNUE file  */
-  const char * smallFile            /** Path to small NNUE file */
-);
-
-/**
 * Evaluate on FEN string
 * Returns
 *   Score relative to side to move in approximate centi-pawns

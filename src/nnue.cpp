@@ -98,53 +98,6 @@ enum {
   FtOutDims = kHalfDimensions * 2
 };
 
-// ---------------------------------------------------------------------------
-//  SFNNv13 HalfKAv2 Architecture Constants
-//  Modern Stockfish dual-network (Big + Small) with King Buckets
-// ---------------------------------------------------------------------------
-
-// Network file sizes (exact byte counts)
-enum {
-  SFNNv13_Big_Size   = 65429575,  // Big  network (~62MB)
-  SFNNv13_Small_Size =  3480122,  // Small network (~3.3MB)
-  HalfKP_Legacy_Size = 21022697   // Legacy HalfKP (~20MB)
-};
-
-// SFNNv13 Big network architecture
-enum {
-  SFNNv13_Big_HalfDims      = 3072,
-  SFNNv13_Big_KingBuckets   = 8192,
-  SFNNv13_Big_FtInDims      = 768,   // 12 piece types * 64 squares
-  SFNNv13_Big_FtOutDims     = SFNNv13_Big_HalfDims * 2
-};
-
-// SFNNv13 Small network architecture
-enum {
-  SFNNv13_Small_HalfDims      = 1536,
-  SFNNv13_Small_KingBuckets   = 1024,
-  SFNNv13_Small_FtInDims      = 768,  // 12 piece types * 64 squares
-  SFNNv13_Small_FtOutDims     = SFNNv13_Small_HalfDims * 2
-};
-
-// SFNNv13 magic numbers (HalfKAv2 header signatures)
-enum {
-  SFNNv13_Magic_Version   = 0x7AF32F16u,
-  SFNNv13_Magic_HashLow   = 0x6153107Fu,  // HalfKAv2 hash low
-  SFNNv13_Magic_HashHigh  = 0x1483D667u,  // HalfKAv2 hash high
-  SFNNv13_Magic_Transformer = 0x8774dd14u, // HalfKAv2 transformer magic
-  SFNNv13_Magic_Network   = 0x63337156u   // Network section magic (shared)
-};
-
-// Architecture identification
-enum NetworkArchitecture {
-  ARCH_UNKNOWN = 0,
-  ARCH_HalfKP  = 1,   // Legacy HalfKP (256-dim, no king buckets)
-  ARCH_SFNNv13_Big  = 2, // HalfKAv2 Big  (3072-dim, 8192 king buckets)
-  ARCH_SFNNv13_Small = 3 // HalfKAv2 Small (1536-dim, 1024 king buckets)
-};
-
-static NetworkArchitecture g_NetworkArch = ARCH_UNKNOWN;
-
 // USE_MMX generates _mm_empty() instructions, so undefine if not needed
 #if defined(USE_SSE2)
 #undef USE_MMX
@@ -934,39 +887,6 @@ INLINE void affine_txfm(clipped_t *input, void *output, unsigned inDims,
 static int16_t ft_biases alignas(64) [kHalfDimensions];
 static int16_t ft_weights alignas(64) [kHalfDimensions * FtInDims];
 
-// ---------------------------------------------------------------------------
-//  SFNNv13 HalfKAv2 Weight / Bias Arrays (Big + Small networks)
-//  Dynamically allocated via pointers — parsed by init_weights_sfnnv13()
-// ---------------------------------------------------------------------------
-
-// Big network transformer
-static int16_t* sfnnv13_big_ft_biases = nullptr;
-static int16_t* sfnnv13_big_ft_weights = nullptr;
-
-// Big network layers
-static int32_t* sfnnv13_big_l1_biases = nullptr;
-static int16_t* sfnnv13_big_l1_weights = nullptr;
-static int32_t* sfnnv13_big_l2_biases = nullptr;
-static int8_t*  sfnnv13_big_l2_weights = nullptr;
-static int32_t* sfnnv13_big_out_biases = nullptr;
-static int8_t*  sfnnv13_big_out_weights = nullptr;
-static uint32_t sfnnv13_big_l1Size = 0;
-static uint32_t sfnnv13_big_l2Size = 0;
-
-// Small network transformer
-static int16_t* sfnnv13_small_ft_biases = nullptr;
-static int16_t* sfnnv13_small_ft_weights = nullptr;
-
-// Small network layers
-static int32_t* sfnnv13_small_l1_biases = nullptr;
-static int16_t* sfnnv13_small_l1_weights = nullptr;
-static int32_t* sfnnv13_small_l2_biases = nullptr;
-static int8_t*  sfnnv13_small_l2_weights = nullptr;
-static int32_t* sfnnv13_small_out_biases = nullptr;
-static int8_t*  sfnnv13_small_out_weights = nullptr;
-static uint32_t sfnnv13_small_l1Size = 0;
-static uint32_t sfnnv13_small_l2Size = 0;
-
 #ifdef VECTOR
 #define TILE_HEIGHT (NUM_REGS * SIMD_WIDTH / 16)
 #endif
@@ -1154,313 +1074,9 @@ struct NetData {
 #endif
 };
 
-// ---------------------------------------------------------------------------
-//  SFNNv13 HalfKAv2 Scalar Evaluation (Big network)
-//  Pure C — no SIMD — for correctness verification
-// ---------------------------------------------------------------------------
-
-// Count set bits in a 64-bit integer (portable popcount)
-static inline int popcount64(uint64_t x)
-{
-  int c = 0;
-  while (x) { x &= x - 1; c++; }
-  return c;
-}
-
-// Compute king bucket index for a given perspective.
-// HalfKAv2 uses the king square and occupancy to select which
-// transformer bias slice to use.
-static inline uint32_t sfnnv13_king_bucket(int kingSquare, uint64_t occupiedBB, uint32_t numBuckets)
-{
-  // Orient king square from white's perspective
-  int rank = kingSquare / 8;
-  int file = kingSquare % 8;
-  uint32_t bucket = (uint32_t)(kingSquare * 128 + (rank * 8 + file) * 64 + popcount64(occupiedBB));
-  return bucket % numBuckets;
-}
-
-// Refresh accumulator for SFNNv13 Big network (scalar)
-static void refresh_accumulator_sfnnv13_big(Position *pos)
-{
-  Accumulator *accumulator = &(pos->nnue[0]->accumulator);
-
-  // Build occupied bitboard from piece list
-  uint64_t occupiedBB = 0;
-  for (int i = 0; pos->pieces[i]; i++)
-    occupiedBB |= (1ULL << pos->squares[i]);
-
-  // Find king squares for both colors
-  int wkSquare = -1, bkSquare = -1;
-  for (int i = 0; pos->pieces[i]; i++) {
-    if (pos->pieces[i] == wking) wkSquare = pos->squares[i];
-    if (pos->pieces[i] == bking) bkSquare = pos->squares[i];
-  }
-
-  if (wkSquare < 0 || bkSquare < 0) {
-    accumulator->computedAccumulation = 0;
-    return;
-  }
-
-  uint32_t halfDims = SFNNv13_Big_HalfDims;
-  uint32_t kingBuckets = SFNNv13_Big_KingBuckets;
-
-  // White perspective (c=0): king = white king
-  {
-    uint32_t bucket = sfnnv13_king_bucket(wkSquare, occupiedBB, kingBuckets);
-    // Copy biases for this king bucket
-    for (uint32_t d = 0; d < halfDims; d++)
-      accumulator->accumulation[0][d] = sfnnv13_big_ft_biases[d * kingBuckets + bucket];
-
-    // Accumulate weights for all non-king pieces
-    for (int i = 0; pos->pieces[i]; i++) {
-      int pc = pos->pieces[i];
-      if (pc == wking || pc == bking) continue;
-
-      // HalfKAv2 feature index: (pc - 1) * 64 + square
-      uint32_t featureIdx = (uint32_t)((pc - 1) * 64 + pos->squares[i]);
-      for (uint32_t d = 0; d < halfDims; d++)
-        accumulator->accumulation[0][d] += sfnnv13_big_ft_weights[d * SFNNv13_Big_FtInDims + featureIdx];
-    }
-  }
-
-  // Black perspective (c=1): king = black king
-  // In HalfKAv2, black perspective mirrors squares vertically
-  {
-    uint32_t bucket = sfnnv13_king_bucket(bkSquare, occupiedBB, kingBuckets);
-    for (uint32_t d = 0; d < halfDims; d++)
-      accumulator->accumulation[1][d] = sfnnv13_big_ft_biases[d * kingBuckets + bucket];
-
-    for (int i = 0; pos->pieces[i]; i++) {
-      int pc = pos->pieces[i];
-      if (pc == wking || pc == bking) continue;
-
-      // Mirror square for black perspective
-      int mirroredSq = pos->squares[i] ^ 0x38; // flip rank (sq ^ 56)
-      // For black perspective, swap piece color: white pieces become black and vice versa
-      int blackPC = (pc <= 6) ? (pc + 6) : (pc - 6);
-      uint32_t featureIdx = (uint32_t)((blackPC - 1) * 64 + mirroredSq);
-      for (uint32_t d = 0; d < halfDims; d++)
-        accumulator->accumulation[1][d] += sfnnv13_big_ft_weights[d * SFNNv13_Big_FtInDims + featureIdx];
-    }
-  }
-
-  accumulator->computedAccumulation = 1;
-}
-
-// Clipped ReLU: clamp(x >> SHIFT, 0, 127)
-static inline int8_t clipped_relu(int32_t x)
-{
-  int32_t v = x >> SHIFT;
-  if (v < 0) return 0;
-  if (v > 127) return 127;
-  return (int8_t)v;
-}
-
-// Full evaluation for SFNNv13 Big network (scalar)
-static int nnue_evaluate_pos_sfnnv13_big(Position *pos)
-{
-  Accumulator *accumulator = &(pos->nnue[0]->accumulator);
-
-  // Refresh if needed
-  if (!accumulator->computedAccumulation)
-    refresh_accumulator_sfnnv13_big(pos);
-
-  if (!accumulator->computedAccumulation)
-    return 0; // fallback
-
-  uint32_t halfDims = sfnnv13_big_l1Size ? sfnnv13_big_l1Size : SFNNv13_Big_HalfDims;
-  // Actually, halfDims for the accumulator is SFNNv13_Big_HalfDims (3072)
-  // l1Size and l2Size come from the network header
-  uint32_t l1Size = sfnnv13_big_l1Size;
-  uint32_t l2Size = sfnnv13_big_l2Size;
-
-  if (l1Size == 0 || l2Size == 0)
-    return 0; // network not fully loaded
-
-  // Use side-to-move perspective
-  int perspective = pos->player;
-
-  // Temporary buffers for layer outputs
-  int8_t *l1_input = (int8_t*)malloc(halfDims * sizeof(int8_t));
-  int32_t *l1_output = (int32_t*)malloc(l1Size * sizeof(int32_t));
-  int8_t *l2_input = (int8_t*)malloc(l1Size * sizeof(int8_t));
-  int32_t *l2_output = (int32_t*)malloc(l2Size * sizeof(int32_t));
-
-  if (!l1_input || !l1_output || !l2_input || !l2_output) {
-    free(l1_input); free(l1_output); free(l2_input); free(l2_output);
-    return 0;
-  }
-
-  // Step 1: Clipped ReLU on accumulator → l1 input
-  for (uint32_t i = 0; i < halfDims; i++)
-    l1_input[i] = clipped_relu(accumulator->accumulation[perspective][i]);
-
-  // Step 2: L1 affine transform (l1_weights is [halfDims][l1Size], column-major)
-  for (uint32_t j = 0; j < l1Size; j++) {
-    int32_t sum = sfnnv13_big_l1_biases[j];
-    for (uint32_t i = 0; i < halfDims; i++)
-      sum += (int32_t)l1_input[i] * sfnnv13_big_l1_weights[i * l1Size + j];
-    l1_output[j] = sum;
-  }
-
-  // Step 3: Clipped ReLU on L1 → l2 input
-  for (uint32_t i = 0; i < l1Size; i++)
-    l2_input[i] = clipped_relu(l1_output[i]);
-
-  // Step 4: L2 affine transform (l2_weights is [l2Size][l1Size], row-major)
-  for (uint32_t j = 0; j < l2Size; j++) {
-    int32_t sum = sfnnv13_big_l2_biases[j];
-    for (uint32_t i = 0; i < l1Size; i++)
-      sum += (int32_t)l2_input[i] * sfnnv13_big_l2_weights[j * l1Size + i];
-    l2_output[j] = sum;
-  }
-
-  // Step 5: Clipped ReLU on L2
-  for (uint32_t i = 0; i < l2Size; i++)
-    l2_input[i] = clipped_relu(l2_output[i]);
-
-  // Step 6: Output affine transform
-  int32_t out_value = 0;
-  for (uint32_t j = 0; j < l2Size; j++) {
-    out_value += sfnnv13_big_out_biases[j];
-    out_value += (int32_t)l2_input[j] * sfnnv13_big_out_weights[j];
-  }
-
-  free(l1_input); free(l1_output); free(l2_input); free(l2_output);
-
-  return out_value / FV_SCALE;
-}
-
-// ---------------------------------------------------------------------------
-//  SFNNv13 HalfKAv2 Scalar Evaluation (Small network)
-// ---------------------------------------------------------------------------
-
-static void refresh_accumulator_sfnnv13_small(Position *pos)
-{
-  Accumulator *accumulator = &(pos->nnue[0]->accumulator);
-
-  uint64_t occupiedBB = 0;
-  for (int i = 0; pos->pieces[i]; i++)
-    occupiedBB |= (1ULL << pos->squares[i]);
-
-  int wkSquare = -1, bkSquare = -1;
-  for (int i = 0; pos->pieces[i]; i++) {
-    if (pos->pieces[i] == wking) wkSquare = pos->squares[i];
-    if (pos->pieces[i] == bking) bkSquare = pos->squares[i];
-  }
-
-  if (wkSquare < 0 || bkSquare < 0) {
-    accumulator->computedAccumulation = 0;
-    return;
-  }
-
-  uint32_t halfDims = SFNNv13_Small_HalfDims;
-  uint32_t kingBuckets = SFNNv13_Small_KingBuckets;
-
-  // White perspective
-  {
-    uint32_t bucket = sfnnv13_king_bucket(wkSquare, occupiedBB, kingBuckets);
-    for (uint32_t d = 0; d < halfDims; d++)
-      accumulator->accumulation[0][d] = sfnnv13_small_ft_biases[d * kingBuckets + bucket];
-
-    for (int i = 0; pos->pieces[i]; i++) {
-      int pc = pos->pieces[i];
-      if (pc == wking || pc == bking) continue;
-      uint32_t featureIdx = (uint32_t)((pc - 1) * 64 + pos->squares[i]);
-      for (uint32_t d = 0; d < halfDims; d++)
-        accumulator->accumulation[0][d] += sfnnv13_small_ft_weights[d * SFNNv13_Small_FtInDims + featureIdx];
-    }
-  }
-
-  // Black perspective
-  {
-    uint32_t bucket = sfnnv13_king_bucket(bkSquare, occupiedBB, kingBuckets);
-    for (uint32_t d = 0; d < halfDims; d++)
-      accumulator->accumulation[1][d] = sfnnv13_small_ft_biases[d * kingBuckets + bucket];
-
-    for (int i = 0; pos->pieces[i]; i++) {
-      int pc = pos->pieces[i];
-      if (pc == wking || pc == bking) continue;
-      int mirroredSq = pos->squares[i] ^ 0x38;
-      int blackPC = (pc <= 6) ? (pc + 6) : (pc - 6);
-      uint32_t featureIdx = (uint32_t)((blackPC - 1) * 64 + mirroredSq);
-      for (uint32_t d = 0; d < halfDims; d++)
-        accumulator->accumulation[1][d] += sfnnv13_small_ft_weights[d * SFNNv13_Small_FtInDims + featureIdx];
-    }
-  }
-
-  accumulator->computedAccumulation = 1;
-}
-
-static int nnue_evaluate_pos_sfnnv13_small(Position *pos)
-{
-  Accumulator *accumulator = &(pos->nnue[0]->accumulator);
-
-  if (!accumulator->computedAccumulation)
-    refresh_accumulator_sfnnv13_small(pos);
-
-  if (!accumulator->computedAccumulation)
-    return 0;
-
-  uint32_t halfDims = SFNNv13_Small_HalfDims;
-  uint32_t l1Size = sfnnv13_small_l1Size;
-  uint32_t l2Size = sfnnv13_small_l2Size;
-
-  if (l1Size == 0 || l2Size == 0)
-    return 0;
-
-  int perspective = pos->player;
-
-  int8_t *l1_input = (int8_t*)malloc(halfDims * sizeof(int8_t));
-  int32_t *l1_output = (int32_t*)malloc(l1Size * sizeof(int32_t));
-  int8_t *l2_input = (int8_t*)malloc(l1Size * sizeof(int8_t));
-  int32_t *l2_output = (int32_t*)malloc(l2Size * sizeof(int32_t));
-
-  if (!l1_input || !l1_output || !l2_input || !l2_output) {
-    free(l1_input); free(l1_output); free(l2_input); free(l2_output);
-    return 0;
-  }
-
-  for (uint32_t i = 0; i < halfDims; i++)
-    l1_input[i] = clipped_relu(accumulator->accumulation[perspective][i]);
-
-  for (uint32_t j = 0; j < l1Size; j++) {
-    int32_t sum = sfnnv13_small_l1_biases[j];
-    for (uint32_t i = 0; i < halfDims; i++)
-      sum += (int32_t)l1_input[i] * sfnnv13_small_l1_weights[i * l1Size + j];
-    l1_output[j] = sum;
-  }
-
-  for (uint32_t i = 0; i < l1Size; i++)
-    l2_input[i] = clipped_relu(l1_output[i]);
-
-  for (uint32_t j = 0; j < l2Size; j++) {
-    int32_t sum = sfnnv13_small_l2_biases[j];
-    for (uint32_t i = 0; i < l1Size; i++)
-      sum += (int32_t)l2_input[i] * sfnnv13_small_l2_weights[j * l1Size + i];
-    l2_output[j] = sum;
-  }
-
-  for (uint32_t i = 0; i < l2Size; i++)
-    l2_input[i] = clipped_relu(l2_output[i]);
-
-  int32_t out_value = 0;
-  for (uint32_t j = 0; j < l2Size; j++) {
-    out_value += sfnnv13_small_out_biases[j];
-    out_value += (int32_t)l2_input[j] * sfnnv13_small_out_weights[j];
-  }
-
-  free(l1_input); free(l1_output); free(l2_input); free(l2_output);
-
-  return out_value / FV_SCALE;
-}
-
 // Evaluation function
 int nnue_evaluate_pos(Position *pos)
 {
-  if (g_NetworkArch == ARCH_SFNNv13_Big) return nnue_evaluate_pos_sfnnv13_big(pos);
-  if (g_NetworkArch == ARCH_SFNNv13_Small) return nnue_evaluate_pos_sfnnv13_small(pos);
-
   int32_t out_value;
   alignas(8) mask_t input_mask[FtOutDims / (8 * sizeof(mask_t))];
   alignas(8) mask_t hidden1_mask[8 / sizeof(mask_t)] = { 0 };
@@ -1583,70 +1199,23 @@ enum {
   NetworkStart = TransformerStart + 4 + 2 * 256 + 2 * 256 * 64 * 641
 };
 
-// ---------------------------------------------------------------------------
-//  SFNNv13 HalfKAv2 Binary Header Structures
-//  These describe the on-disk layout of modern Stockfish networks.
-// ---------------------------------------------------------------------------
-
-// SFNNv13 header: 4 bytes version + 4 bytes hashLow + 4 bytes hashHigh + N bytes features
-typedef struct {
-  uint32_t version;       // 0x7AF32F16
-  uint32_t hashLow;       // HalfKAv2 signature
-  uint32_t hashHigh;      // HalfKAv2 signature
-  uint32_t featureSize;   // e.g. 768 for HalfKAv2
-} SFNNv13_Header;
-
-// SFNNv13 transformer section header
-typedef struct {
-  uint32_t magic;         // 0x8774dd14 for HalfKAv2
-  uint32_t halfDims;      // 3072 (Big) or 1536 (Small)
-  uint32_t kingBuckets;   // 8192 (Big) or 1024 (Small)
-} SFNNv13_TransformerHeader;
-
-// SFNNv13 network section header
-typedef struct {
-  uint32_t magic;         // 0x63337156
-  uint32_t l1Size;        // hidden layer 1 size
-  uint32_t l2Size;        // hidden layer 2 size
-} SFNNv13_NetworkHeader;
-
 static bool verify_net(const void *evalData, size_t size)
 {
   const char *d = (const char*)evalData;
 
-  // Legacy HalfKP network
-  if (size == HalfKP_Legacy_Size) {
-    if (readu_le_u32(d) != NnueVersion) return false;
-    if (readu_le_u32(d + 4) != 0x3e5aa6eeU) return false;
-    if (readu_le_u32(d + 8) != 177) return false;
-    if (readu_le_u32(d + TransformerStart) != 0x5d69d7b8) return false;
-    if (readu_le_u32(d + NetworkStart) != 0x63337156) return false;
-    g_NetworkArch = ARCH_HalfKP;
-    return true;
-  }
-
-  // SFNNv13 Big network (HalfKAv2)
-  if (size == SFNNv13_Big_Size) {
-    g_NetworkArch = ARCH_SFNNv13_Big;
-    printf("  Detected: SFNNv13 Big (HalfKAv2, %d-dim, %d king buckets)\n",
-           SFNNv13_Big_HalfDims, SFNNv13_Big_KingBuckets);
+  if (size != 21022697u) {
+    printf("Error: Invalid NNUE file size (%zu bytes), expected 21022697.\n", size);
     fflush(stdout);
-    return true;
+    return false;
   }
 
-  // SFNNv13 Small network (HalfKAv2)
-  if (size == SFNNv13_Small_Size) {
-    g_NetworkArch = ARCH_SFNNv13_Small;
-    printf("  Detected: SFNNv13 Small (HalfKAv2, %d-dim, %d king buckets)\n",
-           SFNNv13_Small_HalfDims, SFNNv13_Small_KingBuckets);
-    fflush(stdout);
-    return true;
-  }
+  if (readu_le_u32(d) != NnueVersion) return false;
+  if (readu_le_u32(d + 4) != 0x3e5aa6eeU) return false;
+  if (readu_le_u32(d + 8) != 177) return false;
+  if (readu_le_u32(d + TransformerStart) != 0x5d69d7b8) return false;
+  if (readu_le_u32(d + NetworkStart) != 0x63337156) return false;
 
-  printf("Warning: Unknown network size (%zu bytes). Bypassing weight initialization.\n", size);
-  fflush(stdout);
-  g_NetworkArch = ARCH_UNKNOWN;
-  return false;
+  return true;
 }
 
 static void init_weights(const void *evalData)
@@ -1677,166 +1246,6 @@ static void init_weights(const void *evalData)
 #endif
 }
 
-// ---------------------------------------------------------------------------
-//  SFNNv13 HalfKAv2 Raw Binary Memory Mapping
-//  Modern Stockfish networks have NO internal headers for Transformer/Network.
-//  Layout: Version(4) + Hash(4) + DescLen(4) + DescriptionString(DescLen) + RAW WEIGHTS
-//  Weights are read sequentially from offset (12 + descLen).
-// ---------------------------------------------------------------------------
-
-// SFNNv13 hidden layer sizes (not embedded in file — architecture-defined)
-enum {
-  SFNNv13_Big_l1Size   = 1536,
-  SFNNv13_Big_l2Size   = 32,
-  SFNNv13_Small_l1Size = 768,
-  SFNNv13_Small_l2Size = 32
-};
-
-static bool init_weights_sfnnv13(const void *evalData)
-{
-  // Skip header: Version(4) + Hash(4) + DescLen(4) + DescriptionString(descLen)
-  uint32_t descLen = readu_le_u32((const char*)evalData + 8);
-  const char *d = (const char*)evalData + 12 + descLen;
-
-  uint32_t halfDims, kingBuckets, ftInDims, l1Size, l2Size;
-
-  switch (g_NetworkArch)
-  {
-    case ARCH_SFNNv13_Big:
-      halfDims  = SFNNv13_Big_HalfDims;
-      kingBuckets = SFNNv13_Big_KingBuckets;
-      ftInDims  = SFNNv13_Big_FtInDims;
-      l1Size    = SFNNv13_Big_l1Size;
-      l2Size    = SFNNv13_Big_l2Size;
-
-      // --- Allocate Big network arrays ---
-      sfnnv13_big_ft_biases  = (int16_t*)malloc(halfDims  * kingBuckets * sizeof(int16_t));
-      sfnnv13_big_ft_weights = (int16_t*)malloc(halfDims  * ftInDims    * sizeof(int16_t));
-      sfnnv13_big_l1_biases  = (int32_t*)malloc(l1Size                   * sizeof(int32_t));
-      sfnnv13_big_l1_weights = (int16_t*)malloc(l1Size    * halfDims    * sizeof(int16_t));
-      sfnnv13_big_l2_biases  = (int32_t*)malloc(l2Size                   * sizeof(int32_t));
-      sfnnv13_big_l2_weights = (int8_t*) malloc(l2Size    * l1Size      * sizeof(int8_t));
-      sfnnv13_big_out_biases = (int32_t*)malloc(1                        * sizeof(int32_t));
-      sfnnv13_big_out_weights= (int8_t*) malloc(l2Size                   * sizeof(int8_t));
-      sfnnv13_big_l1Size = l1Size;
-      sfnnv13_big_l2Size = l2Size;
-
-      if (!sfnnv13_big_ft_biases  || !sfnnv13_big_ft_weights ||
-          !sfnnv13_big_l1_biases  || !sfnnv13_big_l1_weights ||
-          !sfnnv13_big_l2_biases  || !sfnnv13_big_l2_weights ||
-          !sfnnv13_big_out_biases || !sfnnv13_big_out_weights)
-      {
-        printf("  Error: Failed to allocate Big network arrays.\n");
-        fflush(stdout);
-        return false;
-      }
-
-      // 1. FT Biases
-      memcpy(sfnnv13_big_ft_biases, d, halfDims  * kingBuckets * sizeof(int16_t));
-      d += halfDims  * kingBuckets * sizeof(int16_t);
-
-      // 2. FT Weights
-      memcpy(sfnnv13_big_ft_weights, d, halfDims  * ftInDims    * sizeof(int16_t));
-      d += halfDims  * ftInDims    * sizeof(int16_t);
-
-      // 3. L1 Biases
-      memcpy(sfnnv13_big_l1_biases, d, l1Size                   * sizeof(int32_t));
-      d += l1Size                   * sizeof(int32_t);
-
-      // 4. L1 Weights
-      memcpy(sfnnv13_big_l1_weights, d, l1Size    * halfDims    * sizeof(int16_t));
-      d += l1Size    * halfDims    * sizeof(int16_t);
-
-      // 5. L2 Biases
-      memcpy(sfnnv13_big_l2_biases, d, l2Size                   * sizeof(int32_t));
-      d += l2Size                   * sizeof(int32_t);
-
-      // 6. L2 Weights
-      memcpy(sfnnv13_big_l2_weights, d, l2Size    * l1Size      * sizeof(int8_t));
-      d += l2Size    * l1Size      * sizeof(int8_t);
-
-      // 7. Out Biases
-      memcpy(sfnnv13_big_out_biases, d, 1                        * sizeof(int32_t));
-      d += 1                        * sizeof(int32_t);
-
-      // 8. Out Weights
-      memcpy(sfnnv13_big_out_weights, d, l2Size                   * sizeof(int8_t));
-      d += l2Size                   * sizeof(int8_t);
-
-      break;
-
-    case ARCH_SFNNv13_Small:
-      halfDims  = SFNNv13_Small_HalfDims;
-      kingBuckets = SFNNv13_Small_KingBuckets;
-      ftInDims  = SFNNv13_Small_FtInDims;
-      l1Size    = SFNNv13_Small_l1Size;
-      l2Size    = SFNNv13_Small_l2Size;
-
-      // --- Allocate Small network arrays ---
-      sfnnv13_small_ft_biases  = (int16_t*)malloc(halfDims  * kingBuckets * sizeof(int16_t));
-      sfnnv13_small_ft_weights = (int16_t*)malloc(halfDims  * ftInDims    * sizeof(int16_t));
-      sfnnv13_small_l1_biases  = (int32_t*)malloc(l1Size                   * sizeof(int32_t));
-      sfnnv13_small_l1_weights = (int16_t*)malloc(l1Size    * halfDims    * sizeof(int16_t));
-      sfnnv13_small_l2_biases  = (int32_t*)malloc(l2Size                   * sizeof(int32_t));
-      sfnnv13_small_l2_weights = (int8_t*) malloc(l2Size    * l1Size      * sizeof(int8_t));
-      sfnnv13_small_out_biases = (int32_t*)malloc(1                        * sizeof(int32_t));
-      sfnnv13_small_out_weights= (int8_t*) malloc(l2Size                   * sizeof(int8_t));
-      sfnnv13_small_l1Size = l1Size;
-      sfnnv13_small_l2Size = l2Size;
-
-      if (!sfnnv13_small_ft_biases  || !sfnnv13_small_ft_weights ||
-          !sfnnv13_small_l1_biases  || !sfnnv13_small_l1_weights ||
-          !sfnnv13_small_l2_biases  || !sfnnv13_small_l2_weights ||
-          !sfnnv13_small_out_biases || !sfnnv13_small_out_weights)
-      {
-        printf("  Error: Failed to allocate Small network arrays.\n");
-        fflush(stdout);
-        return false;
-      }
-
-      // 1. FT Biases
-      memcpy(sfnnv13_small_ft_biases, d, halfDims  * kingBuckets * sizeof(int16_t));
-      d += halfDims  * kingBuckets * sizeof(int16_t);
-
-      // 2. FT Weights
-      memcpy(sfnnv13_small_ft_weights, d, halfDims  * ftInDims    * sizeof(int16_t));
-      d += halfDims  * ftInDims    * sizeof(int16_t);
-
-      // 3. L1 Biases
-      memcpy(sfnnv13_small_l1_biases, d, l1Size                   * sizeof(int32_t));
-      d += l1Size                   * sizeof(int32_t);
-
-      // 4. L1 Weights
-      memcpy(sfnnv13_small_l1_weights, d, l1Size    * halfDims    * sizeof(int16_t));
-      d += l1Size    * halfDims    * sizeof(int16_t);
-
-      // 5. L2 Biases
-      memcpy(sfnnv13_small_l2_biases, d, l2Size                   * sizeof(int32_t));
-      d += l2Size                   * sizeof(int32_t);
-
-      // 6. L2 Weights
-      memcpy(sfnnv13_small_l2_weights, d, l2Size    * l1Size      * sizeof(int8_t));
-      d += l2Size    * l1Size      * sizeof(int8_t);
-
-      // 7. Out Biases
-      memcpy(sfnnv13_small_out_biases, d, 1                        * sizeof(int32_t));
-      d += 1                        * sizeof(int32_t);
-
-      // 8. Out Weights
-      memcpy(sfnnv13_small_out_weights, d, l2Size                   * sizeof(int8_t));
-      d += l2Size                   * sizeof(int8_t);
-
-      break;
-
-    default:
-      printf("  Error: Unknown SFNNv13 architecture (%d).\n", g_NetworkArch);
-      fflush(stdout);
-      return false;
-  }
-
-  return true;
-}
-
 static bool load_eval_file(const char *evalFile)
 {
   const void *evalData;
@@ -1852,11 +1261,9 @@ static bool load_eval_file(const char *evalFile)
   }
 
   bool success = verify_net(evalData, size);
-  if (success && g_NetworkArch == ARCH_HalfKP)
+
+  if (success) {
     init_weights(evalData);
-  else if (success && (g_NetworkArch == ARCH_SFNNv13_Big || g_NetworkArch == ARCH_SFNNv13_Small)) {
-    if (!init_weights_sfnnv13(evalData))
-      success = false;
   }
   if (mapping) unmap_file(evalData, mapping);
   return success;
@@ -1878,41 +1285,6 @@ DLLExport void _CDECL nnue_init(const char* evalFile)
 
   printf("NNUE file not found!\n");
   fflush(stdout);
-}
-
-DLLExport void _CDECL nnue_init_dual(const char* bigFile, const char* smallFile)
-{
-  bool bigOk = false, smallOk = false;
-
-  printf("Loading NNUE Big  : %s\n", bigFile ? bigFile : "(null)");
-  fflush(stdout);
-  if (bigFile && load_eval_file(bigFile)) {
-    printf("NNUE Big loaded !\n");
-    fflush(stdout);
-    bigOk = true;
-  } else if (bigFile) {
-    printf("NNUE Big file not found!\n");
-    fflush(stdout);
-  }
-
-  printf("Loading NNUE Small: %s\n", smallFile ? smallFile : "(null)");
-  fflush(stdout);
-  if (smallFile && load_eval_file(smallFile)) {
-    printf("NNUE Small loaded !\n");
-    fflush(stdout);
-    smallOk = true;
-  } else if (smallFile) {
-    printf("NNUE Small file not found!\n");
-    fflush(stdout);
-  }
-
-  if (bigOk || smallOk) {
-    printf("Dual NNUE ready (big=%d, small=%d)\n", bigOk, smallOk);
-    fflush(stdout);
-  } else {
-    printf("No NNUE network loaded!\n");
-    fflush(stdout);
-  }
 }
 
 DLLExport int _CDECL nnue_evaluate(

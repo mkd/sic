@@ -15,4 +15,4 @@ int nnue_bridge_evaluate(
     const NNUEState* statePlyMinus2
 );
 
-void load_nnue(const std::string& bigPath, const std::string& smallPath);
+void load_nnue(const std::string& path);
