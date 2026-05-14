@@ -236,14 +236,31 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     int quiet_count = 0;
 
     for (int i = 0; i < list.size(); ++i) {
-        Position next_pos = pos;
-        if (!next_pos.make_move(list.moves[i])) continue;
-
         bool is_quiet = (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
                       && move_prom(list.moves[i]) == PieceType::NONE);
 
-        // Futility Pruning
         bool is_killer = (list.moves[i] == sw.killer_moves[ply][0] || list.moves[i] == sw.killer_moves[ply][1]);
+
+        // Late Move Pruning (LMP)
+        if (depth <= 4 && !in_check && is_quiet && !is_killer) {
+            int lmp_threshold = 3 + 2 * depth * depth;
+            if (legal_moves > lmp_threshold) {
+                continue;
+            }
+        }
+
+        // PVS SEE Pruning
+        if (depth <= 4 && !in_check && !is_killer) {
+            int see_threshold = is_quiet ? -50 : -200 * depth;
+            if (!see_ge(pos, list.moves[i], see_threshold)) {
+                continue;
+            }
+        }
+
+        Position next_pos = pos;
+        if (!next_pos.make_move(list.moves[i])) continue;
+
+        // Futility Pruning
         if (depth <= 4 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 1000) {
             int fp_margin = depth * 100 + 100;
             if (static_eval + fp_margin <= alpha) {
