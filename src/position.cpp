@@ -7,6 +7,8 @@
 #include <sstream>
 #include <cassert>
 #include <cstring>
+#include <iostream>
+#include <iomanip>
 
 // ---------------------------------------------------------------------------
 //  Sic-to-NNUE piece index mapping for HalfKP accumulator updates
@@ -497,4 +499,26 @@ void Position::set_fen(const std::string& fen) {
     nnueStale = true;
 
     set_check_info();
+}
+
+// ---------------------------------------------------------------------------
+//  Print Board (diagnostic command "d")
+// ---------------------------------------------------------------------------
+void Position::print() const {
+    const char piece_chars[] = "PNBRQKpnbrqk";
+    std::cout << "\n +---+---+---+---+---+---+---+---+\n";
+    for (int r = 7; r >= 0; --r) {
+        std::cout << (r + 1) << " |";
+        for (int f = 0; f < 8; ++f) {
+            Square sq = static_cast<Square>(r * 8 + f);
+            Piece p = piece_on(sq);
+            char c = (p == Piece::PIECE_NONE) ? ' ' : piece_chars[static_cast<int>(p)];
+            std::cout << " " << c << " |";
+        }
+        std::cout << "\n +---+---+---+---+---+---+---+---+\n";
+    }
+    std::cout << "   a   b   c   d   e   f   g   h\n\n";
+    std::cout << "Key: " << std::hex << zobristKey << std::dec << "\n";
+    std::cout << "Checkers: " << checkers.bb << "\n";
+    std::cout << std::flush;
 }

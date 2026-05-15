@@ -7,6 +7,7 @@
 #include "../include/timeman.h"
 #include "../include/tt.h"
 #include "../include/nnue_bridge.h"
+#include "../include/evaluate.h"
 #include "../include/thread.h"
 #include <iostream>
 #include <string>
@@ -242,6 +243,10 @@ void uci_loop() {
             std::string rest;
             std::getline(iss, rest);
             parse_go(rest);
+        } else if (cmd == "d") {
+            g_pos.print();
+        } else if (cmd == "eval") {
+            std::cout << "Static Evaluation: " << evaluate(g_pos) << " cp\n";
         } else if (cmd == "quit") {
             return;
         }
