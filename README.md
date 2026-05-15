@@ -40,7 +40,8 @@ Sic features a highly aggressive, state-of-the-art search tree designed to heavi
 
 ## Compiling and Running
 
-**Dependencies:** * A C++20 compatible compiler (GCC/Clang)
+**Dependencies:**
+* A C++20 compatible compiler (GCC/Clang)
 * Make
 
 **Build:**
