@@ -278,7 +278,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         }
 
         // PVS SEE Pruning
-        if (depth <= 4 && !in_check && !is_killer) {
+        if (legal_moves > 0 && depth <= 4 && !in_check && !is_killer) {
             int see_threshold = is_quiet ? -50 : -200 * depth;
             if (!see_ge(pos, list.moves[i], see_threshold)) {
                 continue;
@@ -289,7 +289,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (!next_pos.make_move(list.moves[i])) continue;
 
         // Futility Pruning
-        if (depth <= 4 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 1000) {
+        if (legal_moves > 0 && depth <= 4 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 1000) {
             int fp_margin = depth * 100 + 100;
             if (static_eval + fp_margin <= alpha) {
                 continue;
