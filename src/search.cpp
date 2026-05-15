@@ -31,7 +31,7 @@ void init_lmr() {
 // ---------------------------------------------------------------------------
 //  Move Ordering (MVV-LVA + TT move + Killer Moves)
 // ---------------------------------------------------------------------------
-static int score_move(const Position& pos, Move m, Move tt_move, const SearchWorker& sw, int ply) {
+static int score_move(const Position& pos, Move m, Move tt_move, const SearchWorker& sw, int ply, Move prev_move) {
     if (m == tt_move) return 2000000;
 
     Piece victim = pos.piece_on(move_to(m));
@@ -46,6 +46,14 @@ static int score_move(const Position& pos, Move m, Move tt_move, const SearchWor
     if (m == sw.killer_moves[ply][0]) return 900000;
     if (m == sw.killer_moves[ply][1]) return 800000;
 
+    if (prev_move != MOVE_NONE) {
+        int prev_from = static_cast<int>(move_from(prev_move));
+        int prev_to = static_cast<int>(move_to(prev_move));
+        if (m == sw.counter_moves[prev_from][prev_to]) {
+            return 750000;
+        }
+    }
+
     if (move_prom(m) != PieceType::NONE) {
         return PieceValues[static_cast<int>(move_prom(m))];
     }
@@ -54,10 +62,10 @@ static int score_move(const Position& pos, Move m, Move tt_move, const SearchWor
     return hist_score < 700000 ? hist_score : 700000;
 }
 
-static void sort_moves(const Position& pos, MoveList& list, Move tt_move, const SearchWorker& sw, int ply) {
+static void sort_moves(const Position& pos, MoveList& list, Move tt_move, const SearchWorker& sw, int ply, Move prev_move) {
     int scores[MAX_MOVES];
     for (int i = 0; i < list.size(); ++i) {
-        scores[i] = score_move(pos, list.moves[i], tt_move, sw, ply);
+        scores[i] = score_move(pos, list.moves[i], tt_move, sw, ply, prev_move);
     }
 
     for (int i = 1; i < list.size(); ++i) {
@@ -160,7 +168,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw
 
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
-    sort_moves(pos, list, MOVE_NONE, sw, 0);
+    sort_moves(pos, list, MOVE_NONE, sw, 0, MOVE_NONE);
 
     for (int i = 0; i < list.size(); ++i) {
         if (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
@@ -183,7 +191,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw
 // ---------------------------------------------------------------------------
 //  Negamax Search
 // ---------------------------------------------------------------------------
-static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null, SearchWorker& sw) {
+static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null, SearchWorker& sw, Move prev_move = MOVE_NONE) {
     sw.pv_length[ply] = ply;
 
     if (TimeManager::stop_search) return 0;
@@ -225,7 +233,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     if (!is_null && depth >= 3 && ply > 0 && static_eval >= beta && !in_check) {
         Position null_pos = pos;
         null_pos.make_null_move();
-        Value null_val = -negamax(null_pos, depth - 3, ply + 1, -beta, -beta + 1, true, sw);
+        Value null_val = -negamax(null_pos, depth - 3, ply + 1, -beta, -beta + 1, true, sw, MOVE_NONE);
         if (null_val >= beta) return beta;
     }
 
@@ -236,7 +244,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
-    sort_moves(pos, list, tt_move, sw, ply);
+    sort_moves(pos, list, tt_move, sw, ply, prev_move);
 
     Value best_value = -VALUE_INFINITE;
     Move best_move = MOVE_NONE;
@@ -256,6 +264,15 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (depth <= 4 && !in_check && is_quiet && !is_killer) {
             int lmp_threshold = 3 + 2 * depth * depth;
             if (legal_moves > lmp_threshold) {
+                continue;
+            }
+        }
+
+        // History Pruning
+        if (depth <= 3 && legal_moves > 0 && is_quiet && !is_killer) {
+            int us = static_cast<int>(pos.sideToMove);
+            int hist = sw.history[us][static_cast<int>(move_from(list.moves[i]))][static_cast<int>(move_to(list.moves[i]))];
+            if (hist < -4000 * depth) {
                 continue;
             }
         }
@@ -286,22 +303,22 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         Value val;
 
         if (legal_moves == 0) {
-            val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
+            val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
         } else {
             if (depth >= 3 && legal_moves >= 4 && is_quiet && !is_killer) {
                 int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
                 if (!improving) reduction++;
                 int reduced_depth = std::max(1, depth - 1 - reduction);
-                val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw);
+                val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
                 if (val > alpha && reduced_depth < depth - 1) {
-                    val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw);
+                    val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
                 }
             } else {
-                val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw);
+                val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
             }
 
             if (val > alpha && val < beta) {
-                val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw);
+                val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
             }
         }
 
@@ -337,6 +354,9 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                     int q_to = static_cast<int>(move_to(quiets_searched[q]));
                     sw.history[us][q_from][q_to] -= bonus + sw.history[us][q_from][q_to] * abs(bonus) / 16384;
                 }
+                if (prev_move != MOVE_NONE) {
+                    sw.counter_moves[static_cast<int>(move_from(prev_move))][static_cast<int>(move_to(prev_move))] = list.moves[i];
+                }
             }
             best_move = list.moves[i];
             break;
@@ -366,7 +386,7 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
 
         MoveList list;
         MoveGen::generate_legal_moves(pos, list);
-        sort_moves(pos, list, MOVE_NONE, sw, 0);
+        sort_moves(pos, list, MOVE_NONE, sw, 0, MOVE_NONE);
 
         Value best_value = -VALUE_INFINITE;
 
@@ -378,11 +398,11 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
 
             Value val;
             if (legal_moves == 0) {
-                val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw);
+                val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw, list.moves[i]);
             } else {
-                val = -negamax(next_pos, d - 1, 1, -alpha - 1, -alpha, false, sw);
+                val = -negamax(next_pos, d - 1, 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
                 if (val > alpha) {
-                    val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw);
+                    val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw, list.moves[i]);
                 }
             }
 
