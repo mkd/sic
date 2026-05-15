@@ -77,9 +77,10 @@ public:
     Position() = default;
 
     // -----------------------------------------------------------------------
-    //  FEN Parsing
+    //  FEN Parsing & Generation
     // -----------------------------------------------------------------------
     void set_fen(const std::string& fen);
+    std::string get_fen() const;
 
     // -----------------------------------------------------------------------
     //  Basic Getters (FORCE_INLINE)

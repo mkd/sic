@@ -426,6 +426,7 @@ void Position::make_null_move() {
 //  FEN Parsing
 // ---------------------------------------------------------------------------
 void Position::set_fen(const std::string& fen) {
+    // --- Full state reset ---
     for (int i = 0; i < 7; ++i) byTypeBB[i] = {0};
     for (int i = 0; i < 2; ++i) byColorBB[i] = {0};
     for (int i = 0; i < 64; ++i) board[i] = Piece::PIECE_NONE;
@@ -437,7 +438,7 @@ void Position::set_fen(const std::string& fen) {
     fullmoveNumber = 1;
     zobristKey = 0;
 
-    // --- Initialize NNUE state ---
+    // --- Reset NNUE state ---
     std::memset(&nnueState, 0, sizeof(NNUEState));
     nnueState.accumulator.computedAccumulation = 0;
     nnueStatePlyMinus1 = nullptr;
@@ -445,10 +446,10 @@ void Position::set_fen(const std::string& fen) {
     nnueStale = true;
 
     std::istringstream iss(fen);
-
     std::string token;
-    iss >> token;
 
+    // --- Field 1: Piece placement ---
+    iss >> token;
     int sq = 56;
     for (char c : token) {
         if (c == '/') {
@@ -458,7 +459,7 @@ void Position::set_fen(const std::string& fen) {
             sq += (c - '0');
         } else {
             Piece p = char_to_piece(c);
-            if (p != Piece::PIECE_NONE) {
+            if (p != Piece::PIECE_NONE && sq >= 0 && sq < 64) {
                 board[sq] = p;
                 const int pt_idx = static_cast<int>(p) % 6 + 1;
                 byTypeBB[pt_idx].bb |= (1ULL << sq);
@@ -469,16 +470,16 @@ void Position::set_fen(const std::string& fen) {
         }
     }
 
+    // --- Field 2: Active color ---
     iss >> token;
     sideToMove = (token == "w") ? Color::WHITE : Color::BLACK;
     if (sideToMove == Color::BLACK) {
         zobristKey ^= ZobristSide;
     }
 
+    // --- Field 3: Castling availability ---
     iss >> token;
-    if (token == "-") {
-        castlingRights = CASTLING_NONE;
-    } else {
+    if (token != "-") {
         for (char c : token) {
             switch (c) {
                 case 'K': castlingRights |= WHITE_OO;  break;
@@ -491,23 +492,95 @@ void Position::set_fen(const std::string& fen) {
     }
     zobristKey ^= ZobristCastling[castlingRights];
 
+    // --- Field 4: En passant target square ---
     iss >> token;
-    if (token != "-") {
+    if (token != "-" && token.size() == 2) {
         int file = token[0] - 'a';
         int rank = token[1] - '1';
-        epSquare = static_cast<Square>(rank * 8 + file);
-        zobristKey ^= ZobristEpFile[file];
+        if (file >= 0 && file < 8 && rank >= 0 && rank < 8) {
+            epSquare = static_cast<Square>(rank * 8 + file);
+            zobristKey ^= ZobristEpFile[file];
+        }
     }
 
+    // --- Field 5: Halfmove clock ---
     iss >> token;
-    halfmoveClock = std::stoi(token);
+    if (!iss.fail()) {
+        try {
+            halfmoveClock = std::stoi(token);
+        } catch (...) {
+            halfmoveClock = 0;
+        }
+    }
 
+    // --- Field 6: Fullmove number ---
     iss >> token;
-    fullmoveNumber = std::stoi(token);
+    if (!iss.fail()) {
+        try {
+            fullmoveNumber = std::stoi(token);
+        } catch (...) {
+            fullmoveNumber = 1;
+        }
+    }
 
     nnueStale = true;
-
     set_check_info();
+}
+
+// ---------------------------------------------------------------------------
+//  FEN Generation
+// ---------------------------------------------------------------------------
+std::string Position::get_fen() const {
+    std::ostringstream oss;
+
+    // --- Piece placement (ranks 8 to 1) ---
+    for (int r = 7; r >= 0; --r) {
+        int empty = 0;
+        for (int f = 0; f < 8; ++f) {
+            int sq = r * 8 + f;
+            Piece p = board[sq];
+            if (p == Piece::PIECE_NONE) {
+                ++empty;
+            } else {
+                if (empty > 0) {
+                    oss << empty;
+                    empty = 0;
+                }
+                oss << piece_to_char(p);
+            }
+        }
+        if (empty > 0) oss << empty;
+        if (r > 0) oss << '/';
+    }
+
+    // --- Active color ---
+    oss << (sideToMove == Color::WHITE ? " w" : " b");
+
+    // --- Castling rights ---
+    oss << ' ';
+    if (castlingRights == CASTLING_NONE) {
+        oss << '-';
+    } else {
+        if (castlingRights & WHITE_OO)  oss << 'K';
+        if (castlingRights & WHITE_OOO) oss << 'Q';
+        if (castlingRights & BLACK_OO)  oss << 'k';
+        if (castlingRights & BLACK_OOO) oss << 'q';
+    }
+
+    // --- En passant square ---
+    oss << ' ';
+    if (epSquare == Square::SQ_NONE) {
+        oss << '-';
+    } else {
+        int sq_int = static_cast<int>(epSquare);
+        oss << static_cast<char>('a' + (sq_int % 8))
+            << static_cast<char>('1' + (sq_int / 8));
+    }
+
+    // --- Halfmove clock & fullmove number ---
+    oss << ' ' << halfmoveClock << ' ' << fullmoveNumber;
+
+    return oss.str();
 }
 
 // ---------------------------------------------------------------------------

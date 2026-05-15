@@ -59,15 +59,17 @@ static void parse_position(const std::string& args) {
             }
         }
     } else if (token == "fen") {
-        std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
+        // --- Read exactly 6 FEN tokens, building the string from scratch ---
+        std::string fen;
         for (int i = 0; i < 6; ++i) {
             iss >> token;
-            fen += " " + token;
+            fen += token;
+            if (i < 5) fen += ' ';
         }
 
         g_pos.set_fen(fen);
 
+        // --- Handle "moves ..." appended after FEN ---
         std::string move_token;
         while (iss >> move_token) {
             if (move_token == "moves") {
@@ -239,8 +241,10 @@ void uci_loop() {
             parse_go(rest);
         } else if (cmd == "d") {
             g_pos.print();
+            std::cout << "FEN: " << g_pos.get_fen() << "\n";
         } else if (cmd == "eval") {
             std::cout << "Static Evaluation: " << evaluate(g_pos) << " cp\n";
+            std::cout << "FEN: " << g_pos.get_fen() << "\n";
         } else if (cmd == "quit") {
             return;
         }
