@@ -9,6 +9,12 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <vector>
+
+// ---------------------------------------------------------------------------
+//  Game History (from uci.cpp)
+// ---------------------------------------------------------------------------
+extern std::vector<uint64_t> g_gameHistory;
 
 // ---------------------------------------------------------------------------
 //  LMR Table
@@ -150,6 +156,34 @@ static bool see_ge(const Position& pos, Move m, int threshold) {
 }
 
 // ---------------------------------------------------------------------------
+//  Repetition Detection (2-fold, aggressive)
+// ---------------------------------------------------------------------------
+static bool is_repetition(const Position& pos, int ply, const SearchWorker& sw) {
+    int hmr = pos.halfmoveClock;
+    int checks = 0;
+
+    // Search backward through in-search history (step by 2: same side-to-move)
+    for (int i = ply - 2; i >= 0; i -= 2) {
+        if (--hmr <= 0) return false;
+        if (sw.search_history[i] == pos.zobristKey) {
+            checks++;
+            if (checks >= 1) return true;
+        }
+    }
+
+    // Search backward through UCI game history (step by 2)
+    for (int i = static_cast<int>(g_gameHistory.size()) - 2; i >= 0; i -= 2) {
+        if (--hmr <= 0) break;
+        if (g_gameHistory[i] == pos.zobristKey) {
+            checks++;
+            if (checks >= 1) return true;
+        }
+    }
+
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 //  Quiescence Search
 // ---------------------------------------------------------------------------
 static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw) {
@@ -162,6 +196,10 @@ static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw
     }
 
     Value stand_pat = evaluate(pos);
+
+    // Draw detection: 50-move rule and insufficient material
+    if (pos.halfmoveClock >= 100) return 0;
+    if (pos.is_insufficient_material()) return 0;
 
     if (stand_pat >= beta) return beta;
     if (stand_pat > alpha) alpha = stand_pat;
@@ -193,6 +231,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw
 // ---------------------------------------------------------------------------
 static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null, SearchWorker& sw, Move prev_move = MOVE_NONE) {
     sw.pv_length[ply] = ply;
+    sw.search_history[ply] = pos.zobristKey;
 
     if (TimeManager::stop_search) return 0;
 
@@ -204,6 +243,13 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
     if (depth == 0) {
         return quiescence(pos, alpha, beta, sw);
+    }
+
+    // Draw detection: 50-move rule, insufficient material, repetition
+    if (ply > 0) {
+        if (pos.halfmoveClock >= 100) return 0;
+        if (pos.is_insufficient_material()) return 0;
+        if (is_repetition(pos, ply, sw)) return 0;
     }
 
     bool in_check = pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove);

@@ -19,6 +19,11 @@
 static Position g_pos;
 
 // ---------------------------------------------------------------------------
+//  Game History (Zobrist keys for repetition detection)
+// ---------------------------------------------------------------------------
+std::vector<uint64_t> g_gameHistory;
+
+// ---------------------------------------------------------------------------
 //  NNUE Network File Path (single HalfKP)
 // ---------------------------------------------------------------------------
 static std::string evalFile = "nn-62ef826d1a6d.nnue";
@@ -33,6 +38,9 @@ static void parse_position(const std::string& args) {
 
     if (token == "startpos") {
         g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+
+        g_gameHistory.clear();
+        g_gameHistory.push_back(g_pos.zobristKey);
 
         std::string move_token;
         while (iss >> move_token) {
@@ -54,7 +62,9 @@ static void parse_position(const std::string& args) {
                     }
 
                     Move mv = make_move(from, to, flag, prom);
-                    g_pos.make_move(mv);
+                    if (g_pos.make_move(mv)) {
+                        g_gameHistory.push_back(g_pos.zobristKey);
+                    }
                 }
             }
         }
@@ -68,6 +78,9 @@ static void parse_position(const std::string& args) {
         }
 
         g_pos.set_fen(fen);
+
+        g_gameHistory.clear();
+        g_gameHistory.push_back(g_pos.zobristKey);
 
         // --- Handle "moves ..." appended after FEN ---
         std::string move_token;
@@ -90,7 +103,9 @@ static void parse_position(const std::string& args) {
                     }
 
                     Move mv = make_move(from, to, flag, prom);
-                    g_pos.make_move(mv);
+                    if (g_pos.make_move(mv)) {
+                        g_gameHistory.push_back(g_pos.zobristKey);
+                    }
                 }
             }
         }
@@ -189,6 +204,7 @@ void uci_loop() {
         } else if (cmd == "ucinewgame") {
             TimeManager::stop_search = false;
             clear_tt();
+            g_gameHistory.clear();
             std::cout << "option name Hash type spin default 1024 min 1 max 131072" << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;

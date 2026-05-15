@@ -399,6 +399,20 @@ bool Position::make_move(Move m) {
     // --- Update check/pin info for the new position ---
     set_check_info();
 
+    // --- Update halfmove clock: reset on capture or pawn push, increment otherwise ---
+    if (piece_type(moving_piece) == PieceType::PAWN ||
+        captured_piece != Piece::PIECE_NONE ||
+        flag == MOVE_FLAG_ENPASSANT) {
+        halfmoveClock = 0;
+    } else {
+        halfmoveClock++;
+    }
+
+    // --- Update fullmove number: increment when Black's move completes ---
+    if (us == Color::BLACK) {
+        fullmoveNumber++;
+    }
+
     // --- Legality check: is the king of the side that just moved in check? ---
     const Square our_king = get_king_square(us);
     if (is_attacked(our_king, sideToMove)) {
@@ -420,6 +434,7 @@ void Position::make_null_move() {
     zobristKey ^= ZobristSide;
     nnueStale = true;
     nnueState.dirtyPiece.dirtyNum = 0;
+    halfmoveClock++;
 }
 
 // ---------------------------------------------------------------------------
@@ -603,4 +618,44 @@ void Position::print() const {
     std::cout << "Key: " << std::hex << zobristKey << std::dec << "\n";
     std::cout << "Checkers: " << checkers.bb << "\n";
     std::cout << std::flush;
+}
+
+// ---------------------------------------------------------------------------
+//  Insufficient Material Detection
+// ---------------------------------------------------------------------------
+bool Position::is_insufficient_material() const {
+    Bitboard occ = occupied();
+    int occCount = popcount(occ);
+
+    // KvK
+    if (occCount == 2) return true;
+
+    // KvKN or KvKB
+    if (occCount == 3) {
+        Bitboard nonKings = {occ.bb & ~pieces(PieceType::KING).bb};
+        if (nonKings.bb) {
+            Square sq = lsb(nonKings);
+            PieceType pt = piece_type(board[static_cast<int>(sq)]);
+            if (pt == PieceType::KNIGHT || pt == PieceType::BISHOP) return true;
+        }
+    }
+
+    // KvKB opposite-colored bishops
+    if (occCount == 4) {
+        Bitboard wPieces = pieces(Color::WHITE);
+        Bitboard bPieces = pieces(Color::BLACK);
+        Bitboard bishops = pieces(PieceType::BISHOP);
+        Bitboard kings = pieces(PieceType::KING);
+
+        if (popcount(wPieces) == 2 && popcount(bPieces) == 2 &&
+            popcount(bishops) == 2 && popcount(kings) == 2) {
+            Square wb = lsb({wPieces.bb & bishops.bb});
+            Square bb = lsb({bPieces.bb & bishops.bb});
+            int wColor = (static_cast<int>(wb) / 8 + static_cast<int>(wb) % 8) & 1;
+            int bColor = (static_cast<int>(bb) / 8 + static_cast<int>(bb) % 8) & 1;
+            if (wColor != bColor) return true;
+        }
+    }
+
+    return false;
 }

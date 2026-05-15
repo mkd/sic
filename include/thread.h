@@ -3,6 +3,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <cstring>
 #include "position.h"
 
 struct SearchWorker {
@@ -13,8 +14,10 @@ struct SearchWorker {
     int history[2][64][64];
     Value static_evals[128];
     Move counter_moves[64][64];
+    uint64_t search_history[128];
 
     SearchWorker() : node_count(0) {
+        std::memset(search_history, 0, sizeof(search_history));
         for (int i = 0; i < 64; ++i) {
             pv_length[i] = 0;
             for (int j = 0; j < 64; ++j) {
