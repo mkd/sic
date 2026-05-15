@@ -70,7 +70,11 @@ FORCE_INLINE std::string move_to_str(Move m) {
     s += sq_to_str(move_to(m));
 
     if (move_prom(m) != PieceType::NONE) {
-        s += type_to_char(move_prom(m));
+        PieceType prom = move_prom(m);
+        if (prom == PieceType::QUEEN) s += 'q';
+        else if (prom == PieceType::ROOK) s += 'r';
+        else if (prom == PieceType::BISHOP) s += 'b';
+        else if (prom == PieceType::KNIGHT) s += 'n';
     }
     return s;
 }

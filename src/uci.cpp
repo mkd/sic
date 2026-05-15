@@ -46,14 +46,11 @@ static void parse_position(const std::string& args) {
                     int flag = MOVE_FLAG_NORMAL;
 
                     if (m.size() == 5) {
-                        char pc = std::tolower(m[4]);
-                        switch (pc) {
-                            case 'n': prom = PieceType::KNIGHT; break;
-                            case 'b': prom = PieceType::BISHOP; break;
-                            case 'r': prom = PieceType::ROOK;   break;
-                            case 'q': prom = PieceType::QUEEN;  break;
-                            default:  break;
-                        }
+                        char p = m[4];
+                        if (p == 'q') prom = PieceType::QUEEN;
+                        else if (p == 'r') prom = PieceType::ROOK;
+                        else if (p == 'b') prom = PieceType::BISHOP;
+                        else if (p == 'n') prom = PieceType::KNIGHT;
                     }
 
                     Move mv = make_move(from, to, flag, prom);
@@ -83,14 +80,11 @@ static void parse_position(const std::string& args) {
                     int flag = MOVE_FLAG_NORMAL;
 
                     if (m.size() == 5) {
-                        char pc = std::tolower(m[4]);
-                        switch (pc) {
-                            case 'n': prom = PieceType::KNIGHT; break;
-                            case 'b': prom = PieceType::BISHOP; break;
-                            case 'r': prom = PieceType::ROOK;   break;
-                            case 'q': prom = PieceType::QUEEN;  break;
-                            default:  break;
-                        }
+                        char p = m[4];
+                        if (p == 'q') prom = PieceType::QUEEN;
+                        else if (p == 'r') prom = PieceType::ROOK;
+                        else if (p == 'b') prom = PieceType::BISHOP;
+                        else if (p == 'n') prom = PieceType::KNIGHT;
                     }
 
                     Move mv = make_move(from, to, flag, prom);

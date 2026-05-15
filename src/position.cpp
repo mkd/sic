@@ -236,7 +236,7 @@ void Position::set_check_info() {
 bool Position::make_move(Move m) {
     const Square from = move_from(m);
     const Square to = move_to(m);
-    const int flag = move_flag(m);
+    int flag = move_flag(m);
     const PieceType prom = move_prom(m);
 
     const int from_int = static_cast<int>(from);
@@ -246,6 +246,15 @@ bool Position::make_move(Move m) {
     const Piece captured_piece = board[to_int];
     const Color us = sideToMove;
     const Color them = ~us;
+
+    // --- Auto-detect missing flags from naive UCI parsers ---
+    if (piece_type(moving_piece) == PieceType::KING && std::abs(from_int - to_int) == 2) {
+        flag = MOVE_FLAG_CASTLING;
+    } else if (piece_type(moving_piece) == PieceType::PAWN &&
+               captured_piece == Piece::PIECE_NONE &&
+               (from_int % 8 != to_int % 8)) {
+        flag = MOVE_FLAG_ENPASSANT;
+    }
 
     // --- NNUE: mark stale on complex moves ---
     if (piece_type(moving_piece) == PieceType::KING ||
