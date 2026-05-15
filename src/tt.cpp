@@ -1,5 +1,6 @@
 #include "../include/tt.h"
 #include <cstring>
+#include <new>
 
 TTEntry* TT = nullptr;
 size_t TT_SIZE = 0;

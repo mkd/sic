@@ -42,6 +42,12 @@ jobs:
       - name: Release build
         run: make CXX=${{ matrix.cxx }} build
 
+      - name: Download Network and Run Engine
+        run: |
+          wget https://tests.stockfishchess.org/api/nn/nn-62ef826d1a6d.nnue
+          chmod +x sic
+          echo "quit" | ./sic
+
       - name: Run binary (smoke test)
         run: ./sic uci && ./sic isready
         continue-on-error: true
