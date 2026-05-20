@@ -241,8 +241,8 @@ inline constexpr Value VALUE_INFINITE   = 32000;
 inline constexpr Value VALUE_NONE       = 32001;
 inline constexpr Value VALUE_MATE       = 32000;
 inline constexpr Value VALUE_MATE_IN_1  = VALUE_MATE - 1;
-inline constexpr Value VALUE_MATE_IN_2  = VALUE_MATE - 3;
 
+inline constexpr Value VALUE_MATE_IN_2  = VALUE_MATE - 500;
 // Maximum possible evaluation (non-mate), used to clamp raw eval
 inline constexpr Value VALUE_EVAL_MAX = 20000;
 
@@ -259,7 +259,7 @@ inline constexpr bool is_valid(Value v) {
 }
 
 inline constexpr int mate_distance(Value v) {
-    return (VALUE_MATE + 1 - value_abs(v)) / 2;
+    return VALUE_MATE - value_abs(v);
 }
 
 // ---------------------------------------------------------------------------

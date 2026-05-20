@@ -23,5 +23,5 @@ extern size_t TT_SIZE;
 void init_tt(size_t mb_size);
 void clear_tt();
 void record_tt(uint64_t key, int depth, Value score, TTFlag flag, Move best_move);
-bool probe_tt(uint64_t key, int depth, int alpha, int beta, Value& return_score, Move& tt_move);
+bool probe_tt(uint64_t key, int depth, int alpha, int beta, Value& return_score, Move& tt_move, TTFlag& return_flag);
 int get_hashfull();

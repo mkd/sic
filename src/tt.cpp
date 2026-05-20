@@ -24,30 +24,26 @@ void record_tt(uint64_t key, int depth, Value score, TTFlag flag, Move best_move
     TTEntry& entry = TT[key & (TT_SIZE - 1)];
     entry.key       = key;
     entry.best_move = best_move;
+    // Clamp non-exact scores to prevent VALUE_INFINITE from leaking as a mate score
+    if (flag != TT_EXACT) {
+        if (score > VALUE_MATE_IN_1) score = VALUE_MATE_IN_1;
+        else if (score < -VALUE_MATE_IN_1) score = -VALUE_MATE_IN_1;
+    }
     entry.score     = score;
     entry.depth     = static_cast<int8_t>(depth);
     entry.flag      = flag;
 }
 
-bool probe_tt(uint64_t key, int depth, int alpha, int beta, Value& return_score, Move& tt_move) {
+bool probe_tt(uint64_t key, int depth, int alpha, int beta, Value& return_score, Move& tt_move, TTFlag& return_flag) {
     TTEntry& entry = TT[key & (TT_SIZE - 1)];
 
     if (entry.key == key) {
         tt_move = entry.best_move;
 
         if (entry.depth >= depth) {
-            if (entry.flag == TT_EXACT) {
-                return_score = entry.score;
-                return true;
-            }
-            if (entry.flag == TT_ALPHA && entry.score <= alpha) {
-                return_score = alpha;
-                return true;
-            }
-            if (entry.flag == TT_BETA && entry.score >= beta) {
-                return_score = beta;
-                return true;
-            }
+            return_score = entry.score;
+            return_flag = entry.flag;
+            return true;
         }
     }
 

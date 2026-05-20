@@ -186,7 +186,7 @@ static bool is_repetition(const Position& pos, int ply, const SearchWorker& sw) 
 // ---------------------------------------------------------------------------
 //  Quiescence Search
 // ---------------------------------------------------------------------------
-static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw) {
+static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchWorker& sw) {
     if (TimeManager::stop_search) return 0;
 
     sw.node_count++;
@@ -195,29 +195,37 @@ static Value quiescence(Position& pos, Value alpha, Value beta, SearchWorker& sw
         if (TimeManager::stop_search) return 0;
     }
 
-    Value stand_pat = evaluate(pos);
-
     // Draw detection: 50-move rule and insufficient material
     if (pos.halfmoveClock >= 100) return 0;
     if (pos.is_insufficient_material()) return 0;
 
-    if (stand_pat >= beta) return beta;
-    if (stand_pat > alpha) alpha = stand_pat;
+    bool in_check = pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove);
+
+    Value stand_pat = evaluate(pos);
 
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
+
+    // Terminal-node detection in QS: if in check and no evasions => checkmate
+    if (in_check && list.size() == 0) {
+        return -(VALUE_MATE - ply);
+    }
+
+    if (stand_pat >= beta) return beta;
+    if (stand_pat > alpha) alpha = stand_pat;
+
     sort_moves(pos, list, MOVE_NONE, sw, 0, MOVE_NONE);
 
     for (int i = 0; i < list.size(); ++i) {
-        if (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
+        if (!in_check && pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
          && move_prom(list.moves[i]) == PieceType::NONE) continue;
 
-        if (!see_ge(pos, list.moves[i], 0)) continue;
+        if (!in_check && !see_ge(pos, list.moves[i], 0)) continue;
 
         Position next_pos = pos;
         if (!next_pos.make_move(list.moves[i])) continue;
 
-        Value val = -quiescence(next_pos, -beta, -alpha, sw);
+        Value val = -quiescence(next_pos, -beta, -alpha, ply + 1, sw);
 
         if (val >= beta) return beta;
         if (val > alpha) alpha = val;
@@ -242,7 +250,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     if (depth == 0) {
-        return quiescence(pos, alpha, beta, sw);
+        return quiescence(pos, alpha, beta, ply, sw);
     }
 
     // Draw detection: 50-move rule, insufficient material, repetition
@@ -263,12 +271,20 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
     Move tt_move = MOVE_NONE;
     Value tt_score;
-    if (ply > 0 && probe_tt(pos.zobristKey, depth, alpha, beta, tt_score, tt_move)) {
-        return tt_score;
+    TTFlag tt_flag;
+    if (ply > 0 && probe_tt(pos.zobristKey, depth, alpha, beta, tt_score, tt_move, tt_flag)) {
+        // 1. Ply-correct first
+        if (tt_score >= VALUE_MATE - 500) tt_score -= ply;
+        else if (tt_score <= -VALUE_MATE + 500) tt_score += ply;
+
+        // 2. Evaluate bounds strictly
+        if (tt_flag == TT_EXACT) return tt_score;
+        if (tt_flag == TT_ALPHA && tt_score <= alpha) return alpha;
+        if (tt_flag == TT_BETA && tt_score >= beta) return beta;
     }
 
     // Reverse Futility Pruning (Static NMP)
-    if (!is_null && depth <= 5 && !in_check && abs(beta) < VALUE_MATE - 1000) {
+    if (!is_null && depth <= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
         int rfp_margin = improving ? depth * 75 : depth * 100;
         if (static_eval - rfp_margin >= beta) {
             return static_eval;
@@ -301,6 +317,11 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     int quiet_count = 0;
 
     for (int i = 0; i < list.size(); ++i) {
+        Position next_pos = pos;
+        if (!next_pos.make_move(list.moves[i])) continue;
+
+        legal_moves++;
+
         bool is_quiet = (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
                       && move_prom(list.moves[i]) == PieceType::NONE);
 
@@ -309,37 +330,26 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         // Late Move Pruning (LMP)
         if (depth <= 4 && !in_check && is_quiet && !is_killer) {
             int lmp_threshold = 3 + 2 * depth * depth;
-            if (legal_moves > lmp_threshold) {
-                continue;
-            }
+            if (legal_moves > lmp_threshold) continue;
         }
 
         // History Pruning
-        if (depth <= 3 && legal_moves > 0 && is_quiet && !is_killer) {
+        if (depth <= 3 && is_quiet && !is_killer) {
             int us = static_cast<int>(pos.sideToMove);
             int hist = sw.history[us][static_cast<int>(move_from(list.moves[i]))][static_cast<int>(move_to(list.moves[i]))];
-            if (hist < -4000 * depth) {
-                continue;
-            }
+            if (hist < -4000 * depth) continue;
         }
 
         // PVS SEE Pruning
-        if (legal_moves > 0 && depth <= 4 && !in_check && !is_killer) {
-            int see_threshold = is_quiet ? -50 : -200 * depth;
-            if (!see_ge(pos, list.moves[i], see_threshold)) {
-                continue;
-            }
+        if (depth <= 4 && !in_check && !is_killer && !is_quiet) {
+            int see_threshold = -200 * depth;
+            if (!see_ge(pos, list.moves[i], see_threshold)) continue;
         }
 
-        Position next_pos = pos;
-        if (!next_pos.make_move(list.moves[i])) continue;
-
         // Futility Pruning
-        if (legal_moves > 0 && depth <= 4 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 1000) {
+        if (depth <= 4 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 500) {
             int fp_margin = depth * 100 + 100;
-            if (static_eval + fp_margin <= alpha) {
-                continue;
-            }
+            if (static_eval + fp_margin <= alpha) continue;
         }
 
         if (is_quiet) {
@@ -347,8 +357,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         }
 
         Value val;
-
-        if (legal_moves == 0) {
+        if (legal_moves == 1) {
             val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
         } else {
             if (depth >= 3 && legal_moves >= 4 && is_quiet && !is_killer) {
@@ -407,11 +416,28 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
             best_move = list.moves[i];
             break;
         }
-
-        legal_moves++;
     }
 
-    record_tt(pos.zobristKey, depth, best_value, flag, best_move);
+    // Terminal-node detection: checkmate or stalemate
+    if (legal_moves == 0) {
+        if (in_check) {
+            best_value = -(VALUE_MATE - ply);
+            flag = TT_EXACT;
+        } else {
+            best_value = VALUE_DRAW;
+            flag = TT_EXACT;
+        }
+    } else if (best_value == -VALUE_INFINITE) {
+        // All legal moves were pruned. Return fail-low.
+        best_value = alpha;
+    }
+
+    // Ply-correct mate scores before storing in TT
+    Value tt_store_value = best_value;
+    if (tt_store_value >= VALUE_MATE - 500) tt_store_value += ply;
+    else if (tt_store_value <= -VALUE_MATE + 500) tt_store_value -= ply;
+
+    record_tt(pos.zobristKey, depth, tt_store_value, flag, best_move);
     return best_value;
 }
 
@@ -427,8 +453,8 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
 
         sw.node_count = 0;
 
-        Value alpha = -VALUE_INFINITE;
-        Value beta = VALUE_INFINITE;
+        Value alpha = -VALUE_MATE_IN_1;
+        Value beta = VALUE_MATE_IN_1;
 
         MoveList list;
         MoveGen::generate_legal_moves(pos, list);
@@ -439,8 +465,8 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
         int legal_moves = 0;
 
         for (int i = 0; i < list.size(); ++i) {
-            Position next_pos = pos;
-            if (!next_pos.make_move(list.moves[i])) continue;
+        Position next_pos = pos;
+        if (!next_pos.make_move(list.moves[i])) continue;
 
             Value val;
             if (legal_moves == 0) {
@@ -480,13 +506,28 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
             uint64_t elapsed = TimeManager::get_time_ms() - TimeManager::start_time;
             uint64_t nps = (elapsed > 0) ? (sw.node_count * 1000) / elapsed : 0;
 
+            std::string score_str;
+            if (is_mate(best_value)) {
+                int plies = mate_distance(best_value);
+                int moves = (plies + 1) / 2;
+                score_str = "score mate " + std::to_string(best_value < 0 ? -moves : moves);
+            } else {
+                score_str = "score cp " + std::to_string(best_value);
+            }
+
             std::cout << "info depth " << d
-                       << " score cp " << best_value
+                       << " " << score_str
                        << " time " << elapsed
                        << " nodes " << sw.node_count
                        << " nps " << nps
                        << " hashfull " << get_hashfull()
                        << " pv" << pv_str << std::endl;
+        }
+
+        // Early termination: Only break if it's a guaranteed Mate-in-1
+        if (best_value == VALUE_MATE_IN_1 || best_value == -VALUE_MATE_IN_1) {
+            best_root_move = sw.pv_array[0][0];
+            break;
         }
 
         best_root_move = sw.pv_array[0][0];
