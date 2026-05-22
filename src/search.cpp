@@ -408,24 +408,30 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
         if (alpha >= beta) {
             flag = TT_BETA;
-            if (is_quiet) {
-                if (list.moves[i] != sw.killer_moves[ply][0]) {
-                    sw.killer_moves[ply][1] = sw.killer_moves[ply][0];
-                    sw.killer_moves[ply][0] = list.moves[i];
+            if (excluded_move == MOVE_NONE) {
+                if (is_quiet) {
+                    if (list.moves[i] != sw.killer_moves[ply][0]) {
+                        sw.killer_moves[ply][1] = sw.killer_moves[ply][0];
+                        sw.killer_moves[ply][0] = list.moves[i];
+                    }
+                    int bonus = depth * depth;
+                    int us = static_cast<int>(pos.sideToMove);
+                    int from = static_cast<int>(move_from(list.moves[i]));
+                    int to = static_cast<int>(move_to(list.moves[i]));
+                    sw.history[us][from][to] += bonus - sw.history[us][from][to] * abs(bonus) / 16384;
+                    for (int q = 0; q < quiet_count - 1; ++q) {
+                        int q_from = static_cast<int>(move_from(quiets_searched[q]));
+                        int q_to = static_cast<int>(move_to(quiets_searched[q]));
+                        sw.history[us][q_from][q_to] -= bonus + sw.history[us][q_from][q_to] * abs(bonus) / 16384;
+                    }
+                    if (prev_move != MOVE_NONE) {
+                        sw.counter_moves[static_cast<int>(move_from(prev_move))][static_cast<int>(move_to(prev_move))] = list.moves[i];
+                    }
                 }
-                int bonus = depth * depth;
-                int us = static_cast<int>(pos.sideToMove);
-                int from = static_cast<int>(move_from(list.moves[i]));
-                int to = static_cast<int>(move_to(list.moves[i]));
-                sw.history[us][from][to] += bonus - sw.history[us][from][to] * abs(bonus) / 16384;
-                for (int q = 0; q < quiet_count - 1; ++q) {
-                    int q_from = static_cast<int>(move_from(quiets_searched[q]));
-                    int q_to = static_cast<int>(move_to(quiets_searched[q]));
-                    sw.history[us][q_from][q_to] -= bonus + sw.history[us][q_from][q_to] * abs(bonus) / 16384;
-                }
-                if (prev_move != MOVE_NONE) {
-                    sw.counter_moves[static_cast<int>(move_from(prev_move))][static_cast<int>(move_to(prev_move))] = list.moves[i];
-                }
+                Value tt_store_value = beta;
+                if (tt_store_value >= VALUE_MATE - 500) tt_store_value += ply;
+                else if (tt_store_value <= -VALUE_MATE + 500) tt_store_value -= ply;
+                record_tt(pos.zobristKey, depth, tt_store_value, flag, list.moves[i]);
             }
             best_move = list.moves[i];
             break;
@@ -451,7 +457,9 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     if (tt_store_value >= VALUE_MATE - 500) tt_store_value += ply;
     else if (tt_store_value <= -VALUE_MATE + 500) tt_store_value -= ply;
 
-    record_tt(pos.zobristKey, depth, tt_store_value, flag, best_move);
+    if (excluded_move == MOVE_NONE) {
+        record_tt(pos.zobristKey, depth, tt_store_value, flag, best_move);
+    }
     return best_value;
 }
 
