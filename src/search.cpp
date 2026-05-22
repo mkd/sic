@@ -237,7 +237,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
 // ---------------------------------------------------------------------------
 //  Negamax Search
 // ---------------------------------------------------------------------------
-static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null, SearchWorker& sw, Move prev_move = MOVE_NONE) {
+static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null, SearchWorker& sw, Move prev_move = MOVE_NONE, Move excluded_move = MOVE_NONE) {
     sw.pv_length[ply] = ply;
     sw.search_history[ply] = pos.zobristKey;
 
@@ -270,9 +270,11 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     Move tt_move = MOVE_NONE;
-    Value tt_score;
-    TTFlag tt_flag;
-    if (ply > 0 && probe_tt(pos.zobristKey, depth, alpha, beta, tt_score, tt_move, tt_flag)) {
+    Value tt_score = VALUE_ZERO;
+    TTFlag tt_flag = TT_EXACT;
+    bool singular_extension = false;
+
+    if (excluded_move == MOVE_NONE && ply > 0 && probe_tt(pos.zobristKey, depth, alpha, beta, tt_score, tt_move, tt_flag)) {
         // 1. Ply-correct first
         if (tt_score >= VALUE_MATE - 500) tt_score -= ply;
         else if (tt_score <= -VALUE_MATE + 500) tt_score += ply;
@@ -281,6 +283,14 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (tt_flag == TT_EXACT) return tt_score;
         if (tt_flag == TT_ALPHA && tt_score <= alpha) return alpha;
         if (tt_flag == TT_BETA && tt_score >= beta) return beta;
+    }
+
+    // Singular Extension (SE)
+    if (depth >= 8 && tt_move != MOVE_NONE && excluded_move == MOVE_NONE && tt_flag != TT_ALPHA && value_abs(tt_score) < VALUE_MATE_IN_2) {
+        int se_depth = (depth - 1) / 2;
+        Value se_beta = tt_score - depth * 2;
+        Value se_score = -negamax(pos, se_depth, ply, -se_beta - 1, -se_beta, true, sw, MOVE_NONE, tt_move);
+        singular_extension = (se_score < se_beta);
     }
 
     // Reverse Futility Pruning (Static NMP)
@@ -317,6 +327,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     int quiet_count = 0;
 
     for (int i = 0; i < list.size(); ++i) {
+        if (list.moves[i] == excluded_move) continue;
+
         Position next_pos = pos;
         if (!next_pos.make_move(list.moves[i])) continue;
 
@@ -356,24 +368,26 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
             quiets_searched[quiet_count++] = list.moves[i];
         }
 
+        int current_extension = (singular_extension && list.moves[i] == tt_move) ? 1 : 0;
+
         Value val;
         if (legal_moves == 1) {
-            val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
+            val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
         } else {
             if (depth >= 3 && legal_moves >= 4 && is_quiet && !is_killer) {
                 int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
                 if (!improving) reduction++;
-                int reduced_depth = std::max(1, depth - 1 - reduction);
+                int reduced_depth = std::max(1, depth - 1 + current_extension - reduction);
                 val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
-                if (val > alpha && reduced_depth < depth - 1) {
-                    val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
+                if (val > alpha && reduced_depth < depth - 1 + current_extension) {
+                    val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
                 }
             } else {
-                val = -negamax(next_pos, depth - 1, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
+                val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
             }
 
             if (val > alpha && val < beta) {
-                val = -negamax(next_pos, depth - 1, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
+                val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
             }
         }
 
@@ -465,8 +479,8 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
         int legal_moves = 0;
 
         for (int i = 0; i < list.size(); ++i) {
-        Position next_pos = pos;
-        if (!next_pos.make_move(list.moves[i])) continue;
+            Position next_pos = pos;
+            if (!next_pos.make_move(list.moves[i])) continue;
 
             Value val;
             if (legal_moves == 0) {
