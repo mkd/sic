@@ -37,6 +37,8 @@ void init_lmr() {
 // ---------------------------------------------------------------------------
 //  Move Ordering (MVV-LVA + TT move + Killer Moves)
 // ---------------------------------------------------------------------------
+static bool see_ge(const Position& pos, Move m, int threshold);
+
 static int score_move(const Position& pos, Move m, Move tt_move, const SearchWorker& sw, int ply, Move prev_move) {
     if (m == tt_move) return 2000000;
 
@@ -44,6 +46,7 @@ static int score_move(const Position& pos, Move m, Move tt_move, const SearchWor
     Piece attacker = pos.piece_on(move_from(m));
 
     if (victim != Piece::PIECE_NONE) {
+        if (!see_ge(pos, m, 0)) return 100000; // Bad capture
         int v = static_cast<int>(piece_type(victim));
         int a = static_cast<int>(piece_type(attacker));
         return 1000000 + 10 * PieceValues[v] - PieceValues[a];
@@ -238,6 +241,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
 //  Negamax Search
 // ---------------------------------------------------------------------------
 static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null, SearchWorker& sw, Move prev_move = MOVE_NONE, Move excluded_move = MOVE_NONE) {
+    __builtin_prefetch(&TT[pos.zobristKey & (TT_SIZE - 1)]);
     sw.pv_length[ply] = ply;
     sw.search_history[ply] = pos.zobristKey;
 
@@ -298,6 +302,15 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         int rfp_margin = improving ? depth * 75 : depth * 100;
         if (static_eval - rfp_margin >= beta) {
             return static_eval;
+        }
+    }
+
+    // Razoring
+    if (!is_null && depth <= 3 && !in_check && abs(beta) < VALUE_MATE - 500) {
+        int razor_margin = depth * 300;
+        if (static_eval + razor_margin <= alpha) {
+            Value qval = quiescence(pos, alpha, beta, ply, sw);
+            if (qval <= alpha) return qval;
         }
     }
 
@@ -377,6 +390,11 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
             if (depth >= 3 && legal_moves >= 4 && is_quiet && !is_killer) {
                 int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
                 if (!improving) reduction++;
+                
+                int us = static_cast<int>(pos.sideToMove);
+                int hist = sw.history[us][static_cast<int>(move_from(list.moves[i]))][static_cast<int>(move_to(list.moves[i]))];
+                if (hist > 4000) reduction--;
+                
                 int reduced_depth = std::max(1, depth - 1 + current_extension - reduction);
                 val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
                 if (val > alpha && reduced_depth < depth - 1 + current_extension) {
@@ -469,6 +487,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 Move search_position(Position& pos, int max_depth, int thread_id) {
     Move best_root_move = MOVE_NONE;
     SearchWorker sw;
+    Value prev_score = 0;
 
     for (int d = 1; d <= max_depth; ++d) {
         if (TimeManager::stop_search) break;
@@ -478,41 +497,68 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
         Value alpha = -VALUE_MATE_IN_1;
         Value beta = VALUE_MATE_IN_1;
 
-        MoveList list;
-        MoveGen::generate_legal_moves(pos, list);
-        sort_moves(pos, list, MOVE_NONE, sw, 0, MOVE_NONE);
+        if (d >= 5) {
+            alpha = std::max(static_cast<Value>(-VALUE_MATE_IN_1), static_cast<Value>(prev_score - 50));
+            beta = std::min(static_cast<Value>(VALUE_MATE_IN_1), static_cast<Value>(prev_score + 50));
+        }
 
         Value best_value = -VALUE_INFINITE;
 
-        int legal_moves = 0;
+        while (true) {
+            Value alpha_orig = alpha;
+            Value beta_orig = beta;
 
-        for (int i = 0; i < list.size(); ++i) {
-            Position next_pos = pos;
-            if (!next_pos.make_move(list.moves[i])) continue;
+            MoveList list;
+            MoveGen::generate_legal_moves(pos, list);
+            sort_moves(pos, list, best_root_move, sw, 0, MOVE_NONE); // Use best_root_move instead of MOVE_NONE for TT move
 
-            Value val;
-            if (legal_moves == 0) {
-                val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw, list.moves[i]);
-            } else {
-                val = -negamax(next_pos, d - 1, 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
-                if (val > alpha) {
+            best_value = -VALUE_INFINITE;
+            int legal_moves = 0;
+
+            for (int i = 0; i < list.size(); ++i) {
+                Position next_pos = pos;
+                if (!next_pos.make_move(list.moves[i])) continue;
+
+                Value val;
+                if (legal_moves == 0) {
                     val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw, list.moves[i]);
+                } else {
+                    val = -negamax(next_pos, d - 1, 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
+                    if (val > alpha && val < beta) {
+                        val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw, list.moves[i]);
+                    }
                 }
+
+                if (val > best_value) {
+                    best_value = val;
+                    sw.pv_array[0][0] = list.moves[i];
+                    for (int j = 1; j < sw.pv_length[1]; ++j) {
+                        sw.pv_array[0][j] = sw.pv_array[1][j];
+                    }
+                    sw.pv_length[0] = sw.pv_length[1];
+                }
+                if (val > alpha) {
+                    alpha = val;
+                }
+
+                legal_moves++;
             }
 
-            if (val > best_value) {
-                best_value = val;
-                sw.pv_array[0][0] = list.moves[i];
-                for (int j = 1; j < sw.pv_length[1]; ++j) {
-                    sw.pv_array[0][j] = sw.pv_array[1][j];
-                }
-                sw.pv_length[0] = sw.pv_length[1];
-            }
-            if (val > alpha) {
-                alpha = val;
+            if (TimeManager::stop_search) {
+                break;
             }
 
-            legal_moves++;
+            if (best_value <= alpha_orig && alpha_orig != -VALUE_MATE_IN_1) {
+                alpha = -VALUE_MATE_IN_1;
+                continue;
+            }
+            if (best_value >= beta_orig && beta_orig != VALUE_MATE_IN_1) {
+                beta = VALUE_MATE_IN_1;
+                continue;
+            }
+
+            prev_score = best_value;
+            break;
         }
 
         if (TimeManager::stop_search) {
