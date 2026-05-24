@@ -9,6 +9,7 @@
 #include "../include/nnue_bridge.h"
 #include "../include/evaluate.h"
 #include "../include/thread.h"
+#include "../include/tbprobe.h"
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -159,17 +160,20 @@ static void parse_go(const std::string& args) {
         if (movetime_ms > 0) {
             max_depth = 64;
             TimeManager::start_time = TimeManager::get_time_ms();
-            TimeManager::allocated_time = movetime_ms;
+            TimeManager::optimum_time = movetime_ms;
+            TimeManager::maximum_time = movetime_ms;
             TimeManager::stop_search = false;
         } else {
             TimeManager::init_timer(time_left, increment);
         }
     } else {
         TimeManager::start_time = TimeManager::get_time_ms();
-        TimeManager::allocated_time = 999999999;
+        TimeManager::optimum_time = 999999999;
+        TimeManager::maximum_time = 999999999;
         TimeManager::stop_search = false;
     }
 
+    inc_tt_age();
     Move best = ThreadPool::start_search(g_pos, max_depth);
     std::cout << "bestmove " << move_to_str(best) << std::endl;
     std::cout.flush();
@@ -195,9 +199,10 @@ void uci_loop() {
         if (cmd == "uci") {
             std::cout << "id name Sic" << std::endl;
             std::cout << "id author Claudio M. Camacho <claudiomkd@gmail.com>" << std::endl;
-            std::cout << "option name Hash type spin default 1024 min 1 max 131072" << std::endl;
+            std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
+            std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
             std::cout << "uciok" << std::endl;
         } else if (cmd == "isready") {
             std::cout << "readyok" << std::endl;
@@ -205,9 +210,10 @@ void uci_loop() {
             TimeManager::stop_search = false;
             clear_tt();
             g_gameHistory.clear();
-            std::cout << "option name Hash type spin default 1024 min 1 max 131072" << std::endl;
+            std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
+            std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
         } else if (cmd == "setoption") {
             std::string rest;
             std::getline(iss, rest);
@@ -246,6 +252,12 @@ void uci_loop() {
                 init_tt(std::stoi(value));
             } else if (name == "Clear Hash") {
                 clear_tt();
+            } else if (name == "SyzygyPath") {
+                if (tb_init(value.c_str())) {
+                    std::cout << "info string Syzygy tablebases initialized (Up to " << TB_LARGEST << " pieces)" << std::endl;
+                } else {
+                    std::cout << "info string Failed to initialize Syzygy tablebases at " << value << std::endl;
+                }
             }
         } else if (cmd == "position") {
             std::string rest;

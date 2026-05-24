@@ -12,7 +12,8 @@ void init_timer(int time_left_ms, int increment_ms);
 void check_time();
 
 extern uint64_t start_time;
-extern uint64_t allocated_time;
+extern uint64_t optimum_time;
+extern uint64_t maximum_time;
 extern bool stop_search;
 
 } // namespace TimeManager

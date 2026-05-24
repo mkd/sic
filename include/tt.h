@@ -15,10 +15,19 @@ struct alignas(16) TTEntry {
     Value    score;
     int8_t   depth;
     TTFlag   flag;
+    uint8_t  age;
+    uint8_t  padding;
 };
 
-extern TTEntry* TT;
-extern size_t TT_SIZE;
+struct alignas(64) TTCluster {
+    TTEntry entries[4];
+};
+
+extern TTCluster* TT;
+extern size_t TT_CLUSTER_COUNT;
+extern uint8_t TT_AGE;
+
+void inc_tt_age();
 
 void init_tt(size_t mb_size);
 void clear_tt();

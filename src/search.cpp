@@ -5,6 +5,8 @@
 #include "../include/tt.h"
 #include "../include/thread.h"
 #include "../include/attacks.h"
+#include "../include/timeman.h"
+#include "../include/tbprobe.h"
 #include <cstdlib>
 #include <cmath>
 #include <algorithm>
@@ -223,6 +225,14 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
         if (!in_check && pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
          && move_prom(list.moves[i]) == PieceType::NONE) continue;
 
+        // Delta Pruning
+        if (!in_check && move_prom(list.moves[i]) == PieceType::NONE) {
+            int captured_val = PieceValues[static_cast<int>(piece_type(pos.piece_on(move_to(list.moves[i]))))];
+            if (stand_pat + captured_val + 200 < alpha) {
+                continue;
+            }
+        }
+
         if (!in_check && !see_ge(pos, list.moves[i], 0)) continue;
 
         Position next_pos = pos;
@@ -241,7 +251,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
 //  Negamax Search
 // ---------------------------------------------------------------------------
 static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null, SearchWorker& sw, Move prev_move = MOVE_NONE, Move excluded_move = MOVE_NONE) {
-    __builtin_prefetch(&TT[pos.zobristKey & (TT_SIZE - 1)]);
+    __builtin_prefetch(&TT[pos.zobristKey & (TT_CLUSTER_COUNT - 1)]);
     sw.pv_length[ply] = ply;
     sw.search_history[ply] = pos.zobristKey;
 
@@ -262,6 +272,32 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (pos.halfmoveClock >= 100) return 0;
         if (pos.is_insufficient_material()) return 0;
         if (is_repetition(pos, ply, sw)) return 0;
+
+        if (TB_LARGEST > 0) {
+            int pieces = __builtin_popcountll(pos.byColorBB[0].bb) + __builtin_popcountll(pos.byColorBB[1].bb);
+            if (pieces <= (int)TB_LARGEST && pos.halfmoveClock == 0 && pos.castlingRights == 0) {
+                unsigned wdl = tb_probe_wdl(
+                    pos.byColorBB[0].bb, pos.byColorBB[1].bb,
+                    pos.byTypeBB[6].bb, pos.byTypeBB[5].bb, pos.byTypeBB[4].bb,
+                    pos.byTypeBB[3].bb, pos.byTypeBB[2].bb, pos.byTypeBB[1].bb,
+                    0, 0, pos.epSquare == Square::SQ_NONE ? 0 : static_cast<unsigned>(pos.epSquare),
+                    pos.sideToMove == Color::WHITE
+                );
+
+                if (wdl != TB_RESULT_FAILED) {
+                    sw.node_count++;
+                    Value v = 0;
+                    if (wdl == TB_WIN) v = VALUE_MATE_IN_1 - ply;
+                    else if (wdl == TB_LOSS) v = -VALUE_MATE_IN_1 + ply;
+                    else if (wdl == TB_DRAW) v = VALUE_DRAW;
+
+                    if (v != 0) {
+                        record_tt(pos.zobristKey, depth, v, TT_EXACT, MOVE_NONE);
+                        return v;
+                    }
+                }
+            }
+        }
     }
 
     bool in_check = pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove);
@@ -305,6 +341,15 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         }
     }
 
+    // ProbCut
+    if (!is_null && depth >= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
+        Value prob_beta = beta + 200;
+        Value pc_score = negamax(pos, depth - 4, ply, prob_beta - 1, prob_beta, false, sw, prev_move, excluded_move);
+        if (pc_score >= prob_beta) {
+            return prob_beta;
+        }
+    }
+
     // Razoring
     if (!is_null && depth <= 3 && !in_check && abs(beta) < VALUE_MATE - 500) {
         int razor_margin = depth * 300;
@@ -314,16 +359,26 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         }
     }
 
-    // Null Move Pruning
+    // Dynamic Null Move Pruning
     if (!is_null && depth >= 3 && ply > 0 && static_eval >= beta && !in_check) {
+        int r = 3 + depth / 4;
+        int nmp_depth = depth - r;
+        if (nmp_depth < 0) nmp_depth = 0;
+        
         Position null_pos = pos;
         null_pos.make_null_move();
-        Value null_val = -negamax(null_pos, depth - 3, ply + 1, -beta, -beta + 1, true, sw, MOVE_NONE);
+        Value null_val = -negamax(null_pos, nmp_depth, ply + 1, -beta, -beta + 1, true, sw, MOVE_NONE);
         if (null_val >= beta) return beta;
     }
 
-    // Internal Iterative Reductions (IIR)
-    if (depth >= 4 && tt_move == MOVE_NONE) {
+    // Internal Iterative Deepening (IID)
+    if (depth >= 6 && tt_move == MOVE_NONE && !is_null) {
+        int iid_depth = depth - 2;
+        negamax(pos, iid_depth, ply, alpha, beta, is_null, sw, prev_move, excluded_move);
+        Value dummy_score;
+        TTFlag dummy_flag;
+        probe_tt(pos.zobristKey, 0, alpha, beta, dummy_score, tt_move, dummy_flag);
+    } else if (depth >= 4 && tt_move == MOVE_NONE) {
         depth--;
     }
 
@@ -486,6 +541,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 // ---------------------------------------------------------------------------
 Move search_position(Position& pos, int max_depth, int thread_id) {
     Move best_root_move = MOVE_NONE;
+    Move last_best_move = MOVE_NONE;
+    int best_move_stability = 0;
     SearchWorker sw;
     Value prev_score = 0;
 
@@ -573,7 +630,7 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
 
             uint64_t elapsed = TimeManager::get_time_ms() - TimeManager::start_time;
             uint64_t nps = (elapsed > 0) ? (sw.node_count * 1000) / elapsed : 0;
-
+            
             std::string score_str;
             if (is_mate(best_value)) {
                 int plies = mate_distance(best_value);
@@ -590,15 +647,38 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
                        << " nps " << nps
                        << " hashfull " << get_hashfull()
                        << " pv" << pv_str << std::endl;
+
+            best_root_move = sw.pv_array[0][0];
+            
+            if (d > 1) {
+                if (best_root_move == last_best_move) {
+                    best_move_stability++;
+                } else {
+                    best_move_stability = 0;
+                    if (TimeManager::optimum_time != 999999999) {
+                        TimeManager::optimum_time = (TimeManager::optimum_time * 15) / 10;
+                    }
+                }
+            }
+            last_best_move = best_root_move;
+            
+            if (!TimeManager::stop_search && TimeManager::optimum_time != 999999999) {
+                uint64_t adjusted_optimum = TimeManager::optimum_time;
+                if (best_move_stability >= 4) {
+                    adjusted_optimum = (adjusted_optimum * 7) / 10;
+                }
+                if (elapsed >= adjusted_optimum) {
+                    break;
+                }
+            }
+        } else {
+            best_root_move = sw.pv_array[0][0];
         }
 
         // Early termination: Only break if it's a guaranteed Mate-in-1
         if (best_value == VALUE_MATE_IN_1 || best_value == -VALUE_MATE_IN_1) {
-            best_root_move = sw.pv_array[0][0];
             break;
         }
-
-        best_root_move = sw.pv_array[0][0];
     }
 
     if (thread_id == 0) {

@@ -28,7 +28,8 @@ endif
 
 # --- Source Discovery ---
 SRCS      := $(wildcard $(SRCDIR)/*.cpp)
-OBJS      := $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SRCS))
+C_SRCS    := $(SRCDIR)/tbprobe.c
+OBJS      := $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SRCS)) $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(C_SRCS))
 DEPS      := $(OBJS:.o=.d)
 
 # --- Test Sources ---
@@ -128,6 +129,10 @@ $(BINARY): $(OBJS) | $(OBJDIR)
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp | $(OBJDIR)
 	@echo "[CXX]   $<"
+	@$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
+	@echo "[CC]    $<"
 	@$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(OBJDIR)/test/%.o: $(TESTDIR)/%.cpp | $(OBJDIR)
