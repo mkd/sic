@@ -49,8 +49,9 @@ FORCE_INLINE constexpr Square move_to(Move m) {
 }
 
 FORCE_INLINE constexpr PieceType move_prom(Move m) {
+    if (((m >> 14) & 0x3) != MOVE_FLAG_PROMOTION) return PieceType::NONE;
     const int val = (m >> 12) & 0x3;
-    return (val == 0) ? PieceType::NONE : static_cast<PieceType>(val + 2);
+    return static_cast<PieceType>(val + 2);
 }
 
 FORCE_INLINE constexpr int move_flag(Move m) {

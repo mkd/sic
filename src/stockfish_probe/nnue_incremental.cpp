@@ -399,9 +399,16 @@ void sync_from_main_thread(const Position& main_pos, const std::deque<StateInfo>
     // Copy the Position by value using memcpy
     std::memcpy(&global_pos, &main_pos, sizeof(Position));
     
-    // Fix pointer
+    // Fix pointers
     if (!setup_states.empty()) {
         global_pos.st = &setup_states.back();
+        
+        // Re-link previous pointers so they point to the thread-local copies,
+        // rather than the original thread's TLS memory!
+        for (size_t i = 1; i < setup_states.size(); ++i) {
+            setup_states[i].previous = &setup_states[i - 1];
+        }
+        setup_states[0].previous = nullptr;
     } else {
         global_pos.st = nullptr;
     }

@@ -186,6 +186,9 @@ static void parse_go(const std::string& args) {
 //  UCI Main Loop
 // ---------------------------------------------------------------------------
 void uci_loop() {
+    Stockfish::Probe::init("nn-sfnnv10.nnue", "nn-baff1ede1f90.nnue");
+    Stockfish::Incremental::init();
+
     g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     Stockfish::Incremental::setup_reset("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
@@ -206,9 +209,6 @@ void uci_loop() {
             std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
             std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
             std::cout << "uciok" << std::endl;
-
-            Stockfish::Probe::init("nn-sfnnv10.nnue", "nn-baff1ede1f90.nnue");
-            Stockfish::Incremental::init();
         } else if (cmd == "isready") {
             std::cout << "readyok" << std::endl;
         } else if (cmd == "ucinewgame") {
