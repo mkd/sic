@@ -70,7 +70,7 @@ write:
     cluster.entries[replace_idx].age = TT_AGE;
 }
 
-bool probe_tt(uint64_t key, int depth, int alpha, int beta, Value& return_score, Move& tt_move, TTFlag& return_flag) {
+bool probe_tt(uint64_t key, int depth, int /*alpha*/, int /*beta*/, Value& return_score, Move& tt_move, TTFlag& return_flag) {
     TTCluster& cluster = TT[key & (TT_CLUSTER_COUNT - 1)];
 
     for (int i = 0; i < 4; ++i) {

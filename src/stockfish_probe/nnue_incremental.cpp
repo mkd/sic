@@ -298,7 +298,7 @@ void do_null_move(StateInfo *new_si) {
   new_si->rule50 = global_pos.st->previous->rule50 + 1;
 }
 
-void undo_move(int move) {
+void undo_move(int /*move*/) {
   // Restore StateInfo
   StateInfo *old_si = global_pos.state();
   StateInfo *prev_si = old_si->previous;

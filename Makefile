@@ -141,7 +141,7 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	@echo "[CC]    $<"
-	@$(CXX) $(CXXFLAGS) -c -o $@ $<
+	@$(CXX) -x c++ $(CXXFLAGS) -c -o $@ $<
 
 $(OBJDIR)/test/%.o: $(TESTDIR)/%.cpp | $(OBJDIR)
 	@echo "[CXX]   $<"

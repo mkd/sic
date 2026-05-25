@@ -559,8 +559,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 // ---------------------------------------------------------------------------
 Move search_position(Position& pos, int max_depth, int thread_id) {
     Move best_root_move = MOVE_NONE;
-    Move last_best_move = MOVE_NONE;
-    int best_move_stability = 0;
+    // Move last_best_move = MOVE_NONE;
+    // int best_move_stability = 0;
     SearchWorker sw;
     Value prev_score = 0;
 
@@ -676,7 +676,7 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
                 }
             }
 
-            last_best_move = best_root_move;
+            // last_best_move = best_root_move;
         } else {
             best_root_move = sw.pv_array[0][0];
         }

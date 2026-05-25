@@ -13,21 +13,21 @@
 // ---------------------------------------------------------------------------
 //  Sic-to-NNUE piece index mapping for HalfKP accumulator updates
 // ---------------------------------------------------------------------------
-constexpr int SicToNnuePiece[13] = {
-    6,  // 0: WHITE_PAWN   -> wpawn
-    5,  // 1: WHITE_KNIGHT -> wknight
-    4,  // 2: WHITE_BISHOP -> wbishop
-    3,  // 3: WHITE_ROOK   -> wrook
-    2,  // 4: WHITE_QUEEN  -> wqueen
-    1,  // 5: WHITE_KING   -> wking
-    12, // 6: BLACK_PAWN   -> bpawn
-    11, // 7: BLACK_KNIGHT -> bknight
-    10, // 8: BLACK_BISHOP -> bbishop
-    9,  // 9: BLACK_ROOK   -> brook
-    8,  // 10: BLACK_QUEEN  -> bqueen
-    7,  // 11: BLACK_KING   -> bking
-    0   // 12: PIECE_NONE   -> blank
-};
+// constexpr int SicToNnuePiece[13] = {
+//     6,  // 0: WHITE_PAWN   -> wpawn
+//     5,  // 1: WHITE_KNIGHT -> wknight
+//     4,  // 2: WHITE_BISHOP -> wbishop
+//     3,  // 3: WHITE_ROOK   -> wrook
+//     2,  // 4: WHITE_QUEEN  -> wqueen
+//     1,  // 5: WHITE_KING   -> wking
+//     12, // 6: BLACK_PAWN   -> bpawn
+//     11, // 7: BLACK_KNIGHT -> bknight
+//     10, // 8: BLACK_BISHOP -> bbishop
+//     9,  // 9: BLACK_ROOK   -> brook
+//     8,  // 10: BLACK_QUEEN  -> bqueen
+//     7,  // 11: BLACK_KING   -> bking
+//     0   // 12: PIECE_NONE   -> blank
+// };
 
 // ---------------------------------------------------------------------------
 //  Zobrist Hashing Tables
