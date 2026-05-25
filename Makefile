@@ -28,8 +28,15 @@ endif
 
 # --- Source Discovery ---
 SRCS      := $(wildcard $(SRCDIR)/*.cpp)
+PROBE_SRCS := $(wildcard $(SRCDIR)/stockfish_probe/*.cpp) \
+              $(SRCDIR)/stockfish_probe/nnue/evaluate_nnue.cpp \
+              $(SRCDIR)/stockfish_probe/nnue/features/half_ka_v2_hm.cpp
 C_SRCS    := $(SRCDIR)/tbprobe.c
-OBJS      := $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SRCS)) $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(C_SRCS))
+OBJS      := $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SRCS)) \
+             $(patsubst $(SRCDIR)/stockfish_probe/%.cpp,$(OBJDIR)/stockfish_probe/%.o,$(wildcard $(SRCDIR)/stockfish_probe/*.cpp)) \
+             $(OBJDIR)/stockfish_probe/nnue/evaluate_nnue.o \
+             $(OBJDIR)/stockfish_probe/nnue/features/half_ka_v2_hm.o \
+             $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(C_SRCS))
 DEPS      := $(OBJS:.o=.d)
 
 # --- Test Sources ---
@@ -127,7 +134,8 @@ $(BINARY): $(OBJS) | $(OBJDIR)
 	@echo "[LINK]  $@"
 	@$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.cpp | $(OBJDIR)
+$(OBJDIR)/%.o: $(SRCDIR)/%.cpp
+	@mkdir -p $(dir $@)
 	@echo "[CXX]   $<"
 	@$(CXX) $(CXXFLAGS) -c -o $@ $<
 

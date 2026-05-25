@@ -6,13 +6,20 @@
 #include "../include/perft.h"
 #include "../include/timeman.h"
 #include "../include/tt.h"
-#include "../include/nnue_bridge.h"
 #include "../include/evaluate.h"
 #include "../include/thread.h"
 #include "../include/tbprobe.h"
+#include "stockfish_probe/probe.h"
+#include "stockfish_probe/nnue_incremental.h"
 #include <iostream>
 #include <string>
 #include <sstream>
+#include <thread>
+
+// ---------------------------------------------------------------------------
+//  Global Search Thread
+// ---------------------------------------------------------------------------
+static std::thread search_thread;
 
 // ---------------------------------------------------------------------------
 //  Global Position
@@ -32,6 +39,17 @@ static std::string evalFile = "nn-62ef826d1a6d.nnue";
 // ---------------------------------------------------------------------------
 //  Parse "position ..." command
 // ---------------------------------------------------------------------------
+static Move parse_move(Position& pos, const std::string& str) {
+    MoveList list;
+    MoveGen::generate_legal_moves(pos, list);
+    for (int i = 0; i < list.size(); ++i) {
+        if (move_to_str(list.moves[i]) == str) {
+            return list.moves[i];
+        }
+    }
+    return MOVE_NONE;
+}
+
 static void parse_position(const std::string& args) {
     std::istringstream iss(args);
     std::string token;
@@ -39,6 +57,7 @@ static void parse_position(const std::string& args) {
 
     if (token == "startpos") {
         g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        Stockfish::Incremental::setup_reset("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
         g_gameHistory.clear();
         g_gameHistory.push_back(g_pos.zobristKey);
@@ -48,22 +67,9 @@ static void parse_position(const std::string& args) {
             if (move_token == "moves") {
                 std::string m;
                 while (iss >> m) {
-                    Square from = static_cast<Square>((m[0] - 'a') + (m[1] - '1') * 8);
-                    Square to = static_cast<Square>((m[2] - 'a') + (m[3] - '1') * 8);
-
-                    PieceType prom = PieceType::NONE;
-                    int flag = MOVE_FLAG_NORMAL;
-
-                    if (m.size() == 5) {
-                        char p = m[4];
-                        if (p == 'q') prom = PieceType::QUEEN;
-                        else if (p == 'r') prom = PieceType::ROOK;
-                        else if (p == 'b') prom = PieceType::BISHOP;
-                        else if (p == 'n') prom = PieceType::KNIGHT;
-                    }
-
-                    Move mv = make_move(from, to, flag, prom);
-                    if (g_pos.make_move(mv)) {
+                    Move mv = parse_move(g_pos, m);
+                    if (mv != MOVE_NONE && g_pos.make_move(mv)) {
+                        Stockfish::Incremental::setup_move(mv);
                         g_gameHistory.push_back(g_pos.zobristKey);
                     }
                 }
@@ -79,6 +85,7 @@ static void parse_position(const std::string& args) {
         }
 
         g_pos.set_fen(fen);
+        Stockfish::Incremental::setup_reset(fen);
 
         g_gameHistory.clear();
         g_gameHistory.push_back(g_pos.zobristKey);
@@ -89,22 +96,9 @@ static void parse_position(const std::string& args) {
             if (move_token == "moves") {
                 std::string m;
                 while (iss >> m) {
-                    Square from = static_cast<Square>((m[0] - 'a') + (m[1] - '1') * 8);
-                    Square to = static_cast<Square>((m[2] - 'a') + (m[3] - '1') * 8);
-
-                    PieceType prom = PieceType::NONE;
-                    int flag = MOVE_FLAG_NORMAL;
-
-                    if (m.size() == 5) {
-                        char p = m[4];
-                        if (p == 'q') prom = PieceType::QUEEN;
-                        else if (p == 'r') prom = PieceType::ROOK;
-                        else if (p == 'b') prom = PieceType::BISHOP;
-                        else if (p == 'n') prom = PieceType::KNIGHT;
-                    }
-
-                    Move mv = make_move(from, to, flag, prom);
-                    if (g_pos.make_move(mv)) {
+                    Move mv = parse_move(g_pos, m);
+                    if (mv != MOVE_NONE && g_pos.make_move(mv)) {
+                        Stockfish::Incremental::setup_move(mv);
                         g_gameHistory.push_back(g_pos.zobristKey);
                     }
                 }
@@ -159,24 +153,33 @@ static void parse_go(const std::string& args) {
 
         if (movetime_ms > 0) {
             max_depth = 64;
+            TimeManager::allocated_time = movetime_ms;
             TimeManager::start_time = TimeManager::get_time_ms();
-            TimeManager::optimum_time = movetime_ms;
-            TimeManager::maximum_time = movetime_ms;
             TimeManager::stop_search = false;
         } else {
             TimeManager::init_timer(time_left, increment);
         }
     } else {
+        TimeManager::allocated_time = 999999999;
         TimeManager::start_time = TimeManager::get_time_ms();
-        TimeManager::optimum_time = 999999999;
-        TimeManager::maximum_time = 999999999;
         TimeManager::stop_search = false;
     }
 
-    inc_tt_age();
-    Move best = ThreadPool::start_search(g_pos, max_depth);
-    std::cout << "bestmove " << move_to_str(best) << std::endl;
-    std::cout.flush();
+    if (search_thread.joinable()) {
+        search_thread.join();
+    }
+
+    auto pos_ptr = std::make_shared<Stockfish::Position>();
+    std::memcpy(pos_ptr.get(), &Stockfish::Incremental::get_global_pos(), sizeof(Stockfish::Position));
+    auto setup_ptr = std::make_shared<std::deque<Stockfish::StateInfo>>(Stockfish::Incremental::get_setup_states());
+
+    search_thread = std::thread([max_depth, pos_ptr, setup_ptr]() {
+        Stockfish::Incremental::sync_from_main_thread(*pos_ptr, *setup_ptr);
+        inc_tt_age();
+        Move best = ThreadPool::start_search(g_pos, max_depth);
+        std::cout << "bestmove " << move_to_str(best) << std::endl;
+        std::cout.flush();
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -184,8 +187,7 @@ static void parse_go(const std::string& args) {
 // ---------------------------------------------------------------------------
 void uci_loop() {
     g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-
-    load_nnue(evalFile);
+    Stockfish::Incremental::setup_reset("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
     std::string line;
 
@@ -204,6 +206,9 @@ void uci_loop() {
             std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
             std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
             std::cout << "uciok" << std::endl;
+
+            Stockfish::Probe::init("nn-sfnnv10.nnue", "nn-baff1ede1f90.nnue");
+            Stockfish::Incremental::init();
         } else if (cmd == "isready") {
             std::cout << "readyok" << std::endl;
         } else if (cmd == "ucinewgame") {
@@ -245,7 +250,7 @@ void uci_loop() {
 
             if (name == "EvalFile") {
                 evalFile = value;
-                load_nnue(evalFile);
+                Stockfish::Probe::init(evalFile.c_str(), "nn-baff1ede1f90.nnue");
             } else if (name == "Threads") {
                 ThreadPool::set_thread_count(std::stoi(value));
             } else if (name == "Hash") {
@@ -270,13 +275,32 @@ void uci_loop() {
         } else if (cmd == "d") {
             g_pos.print();
             std::cout << "FEN: " << g_pos.get_fen() << "\n";
+            MoveList list;
+            MoveGen::generate_legal_moves(g_pos, list);
+            std::cout << "Legal moves: ";
+            for (int i = 0; i < list.size(); ++i) {
+                std::cout << move_to_str(list.moves[i]) << "(" << list.moves[i] << ") ";
+            }
+            std::cout << "\n";
         } else if (cmd == "eval") {
             std::cout << "Static Evaluation: " << evaluate(g_pos) << " cp\n";
             std::cout << "FEN: " << g_pos.get_fen() << "\n";
+        } else if (cmd == "stop") {
+            TimeManager::stop_search = true;
         } else if (cmd == "quit") {
+            TimeManager::stop_search = true;
+            if (search_thread.joinable()) {
+                search_thread.join();
+            }
             return;
         }
 
         std::cout.flush();
+    }
+
+    // Clean up if we break out of the loop (e.g., EOF)
+    TimeManager::stop_search = true;
+    if (search_thread.joinable()) {
+        search_thread.join();
     }
 }

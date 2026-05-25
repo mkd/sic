@@ -1,0 +1,3 @@
+run < cmds.txt
+bt
+quit

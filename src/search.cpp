@@ -12,6 +12,21 @@
 #include <algorithm>
 #include <iostream>
 #include <vector>
+#include <string>
+#include "stockfish_probe/nnue_incremental.h"
+
+struct NnueGuard {
+    int move;
+    bool is_null;
+    NnueGuard(int m, bool null_move = false) : move(m), is_null(null_move) {
+        if (is_null) Stockfish::Incremental::push_null_state();
+        else Stockfish::Incremental::push_state(move);
+    }
+    ~NnueGuard() {
+        if (is_null) Stockfish::Incremental::pop_state(0);
+        else Stockfish::Incremental::pop_state(move);
+    }
+};
 
 // ---------------------------------------------------------------------------
 //  Game History (from uci.cpp)
@@ -238,6 +253,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
         Position next_pos = pos;
         if (!next_pos.make_move(list.moves[i])) continue;
 
+        NnueGuard guard(list.moves[i]);
         Value val = -quiescence(next_pos, -beta, -alpha, ply + 1, sw);
 
         if (val >= beta) return beta;
@@ -367,6 +383,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         
         Position null_pos = pos;
         null_pos.make_null_move();
+        NnueGuard guard(0, true);
         Value null_val = -negamax(null_pos, nmp_depth, ply + 1, -beta, -beta + 1, true, sw, MOVE_NONE);
         if (null_val >= beta) return beta;
     }
@@ -400,6 +417,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         Position next_pos = pos;
         if (!next_pos.make_move(list.moves[i])) continue;
 
+        NnueGuard guard(list.moves[i]);
         legal_moves++;
 
         bool is_quiet = (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
@@ -576,6 +594,7 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
                 Position next_pos = pos;
                 if (!next_pos.make_move(list.moves[i])) continue;
 
+                NnueGuard guard(list.moves[i]);
                 Value val;
                 if (legal_moves == 0) {
                     val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw, list.moves[i]);
@@ -650,27 +669,14 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
 
             best_root_move = sw.pv_array[0][0];
             
-            if (d > 1) {
-                if (best_root_move == last_best_move) {
-                    best_move_stability++;
-                } else {
-                    best_move_stability = 0;
-                    if (TimeManager::optimum_time != 999999999) {
-                        TimeManager::optimum_time = (TimeManager::optimum_time * 15) / 10;
-                    }
-                }
-            }
-            last_best_move = best_root_move;
-            
-            if (!TimeManager::stop_search && TimeManager::optimum_time != 999999999) {
-                uint64_t adjusted_optimum = TimeManager::optimum_time;
-                if (best_move_stability >= 4) {
-                    adjusted_optimum = (adjusted_optimum * 7) / 10;
-                }
-                if (elapsed >= adjusted_optimum) {
+            // Time check for normal moves
+            if (!TimeManager::stop_search && TimeManager::allocated_time != 999999999) {
+                if (elapsed >= TimeManager::allocated_time) {
                     break;
                 }
             }
+
+            last_best_move = best_root_move;
         } else {
             best_root_move = sw.pv_array[0][0];
         }

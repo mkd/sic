@@ -69,11 +69,6 @@ public:
     Bitboard blockersForKing[2];
     Bitboard pinners[2];
 
-    NNUEState nnueState;
-    NNUEState* nnueStatePlyMinus1;
-    NNUEState* nnueStatePlyMinus2;
-    bool nnueStale;
-
     Position() = default;
 
     // -----------------------------------------------------------------------

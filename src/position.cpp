@@ -256,44 +256,7 @@ bool Position::make_move(Move m) {
         flag = MOVE_FLAG_ENPASSANT;
     }
 
-    // --- NNUE: mark stale on complex moves ---
-    if (piece_type(moving_piece) == PieceType::KING ||
-        flag == MOVE_FLAG_CASTLING ||
-        flag == MOVE_FLAG_ENPASSANT ||
-        prom != PieceType::NONE) {
-        nnueStale = true;
-    } else {
-        nnueStale = false;
-    }
-
-    // --- NNUE: track dirty pieces for incremental update ---
-    // nnue-probe piece codes: wking=1..wpawn=6, bking=7..bpawn=12
-    // Sic piece codes: 0..11. Conversion: nnue_code = sic_code + 1
-    int dirtyNum = 0;
-    if (!nnueStale) {
-        // Removing piece from 'from'
-        nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(moving_piece)];
-        nnueState.dirtyPiece.from[dirtyNum] = from_int;
-        nnueState.dirtyPiece.to[dirtyNum] = 64;
-        dirtyNum++;
-
-        // If capture, removing piece from 'to'
-        if (captured_piece != Piece::PIECE_NONE) {
-            nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(captured_piece)];
-            nnueState.dirtyPiece.from[dirtyNum] = to_int;
-            nnueState.dirtyPiece.to[dirtyNum] = 64;
-            dirtyNum++;
-        }
-
-        // Placing piece on 'to'
-        Piece placed_piece = (prom != PieceType::NONE) ? make_piece(us, prom) : moving_piece;
-        nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(placed_piece)];
-        nnueState.dirtyPiece.from[dirtyNum] = 64;
-        nnueState.dirtyPiece.to[dirtyNum] = to_int;
-        dirtyNum++;
-    }
-
-    // --- Update Zobrist: remove moving piece ---
+    // --- Handle moving piece ---
     zobristKey ^= ZobristPiece[static_cast<int>(moving_piece)][from_int];
 
     // --- Move the piece on the board ---
@@ -324,13 +287,6 @@ bool Position::make_move(Move m) {
         board[captured_sq] = Piece::PIECE_NONE;
         byTypeBB[static_cast<int>(ep_pawn) % 6 + 1].bb &= ~(1ULL << captured_sq);
         byColorBB[static_cast<int>(them)].bb &= ~(1ULL << captured_sq);
-
-        if (!nnueStale) {
-            nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(ep_pawn)];
-            nnueState.dirtyPiece.from[dirtyNum] = captured_sq;
-            nnueState.dirtyPiece.to[dirtyNum] = 64;
-            dirtyNum++;
-        }
     }
 
     // --- Castling: move the rook ---
@@ -356,22 +312,8 @@ bool Position::make_move(Move m) {
             byColorBB[static_cast<int>(us)].bb |= (1ULL << rookTo);
             zobristKey ^= ZobristPiece[static_cast<int>(rookPiece)][rookFrom];
             zobristKey ^= ZobristPiece[static_cast<int>(rookPiece)][rookTo];
-
-            if (!nnueStale) {
-                nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(rookPiece)];
-                nnueState.dirtyPiece.from[dirtyNum] = rookFrom;
-                nnueState.dirtyPiece.to[dirtyNum] = 64;
-                dirtyNum++;
-                nnueState.dirtyPiece.pc[dirtyNum] = SicToNnuePiece[static_cast<int>(rookPiece)];
-                nnueState.dirtyPiece.from[dirtyNum] = 64;
-                nnueState.dirtyPiece.to[dirtyNum] = rookTo;
-                dirtyNum++;
-            }
         }
     }
-
-    // --- NNUE: finalize dirty piece count ---
-    nnueState.dirtyPiece.dirtyNum = dirtyNum;
 
     // --- Update castling rights ---
     zobristKey ^= ZobristCastling[castlingRights];
@@ -432,8 +374,6 @@ void Position::make_null_move() {
     }
     sideToMove = (sideToMove == Color::BLACK) ? Color::WHITE : Color::BLACK;
     zobristKey ^= ZobristSide;
-    nnueStale = true;
-    nnueState.dirtyPiece.dirtyNum = 0;
     halfmoveClock++;
 }
 
@@ -453,13 +393,7 @@ void Position::set_fen(const std::string& fen) {
     fullmoveNumber = 1;
     zobristKey = 0;
 
-    // --- Reset NNUE state ---
-    std::memset(&nnueState, 0, sizeof(NNUEState));
-    nnueState.accumulator.computedAccumulation = 0;
-    nnueStatePlyMinus1 = nullptr;
-    nnueStatePlyMinus2 = nullptr;
-    nnueStale = true;
-
+    set_check_info();
     std::istringstream iss(fen);
     std::string token;
 
@@ -538,7 +472,6 @@ void Position::set_fen(const std::string& fen) {
         }
     }
 
-    nnueStale = true;
     set_check_info();
 }
 

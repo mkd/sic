@@ -1,0 +1,9 @@
+uci
+isready
+position startpos moves e2e3 f7f5 d2d4 g8f6 c2c4 e7e6 b1c3 d7d5 a2a3 c7c6 f2f4 f8e7 g1f3 e8g8
+d
+position startpos moves e2e3 f7f5 d2d4 g8f6 c2c4 e7e6 b1c3 d7d5 a2a3 c7c6 f2f4 f8e7 g1f3 e8g8 c1d2 a7a6 c4c5 b7b5
+d
+position startpos moves e2e3 f7f5 d2d4 g8f6 c2c4 e7e6 b1c3 d7d5 a2a3 c7c6 f2f4 f8e7 g1f3 e8g8 c1d2 a7a6 c4c5 b7b5 f1e2 c8d7 b2b4
+d
+quit

@@ -1,0 +1,34 @@
+stockfish_probe/position.o: stockfish_probe/position.cpp \
+  stockfish_probe/position.h stockfish_probe/bitboard.h \
+  stockfish_probe/types.h stockfish_probe/nnue/nnue_accumulator.h \
+  stockfish_probe/nnue/nnue_architecture.h \
+  stockfish_probe/nnue/features/half_ka_v2_hm.h \
+  stockfish_probe/nnue/features/../../misc.h \
+  stockfish_probe/nnue/features/../../types.h \
+  stockfish_probe/nnue/features/../nnue_common.h \
+  stockfish_probe/nnue/layers/affine_transform.h \
+  stockfish_probe/nnue/layers/../nnue_common.h \
+  stockfish_probe/nnue/layers/simd.h \
+  stockfish_probe/nnue/layers/affine_transform_sparse_input.h \
+  stockfish_probe/nnue/layers/../../bitboard.h \
+  stockfish_probe/nnue/layers/clipped_relu.h \
+  stockfish_probe/nnue/layers/sqr_clipped_relu.h \
+  stockfish_probe/nnue/nnue_common.h stockfish_probe/misc.h
+stockfish_probe/position.h:
+stockfish_probe/bitboard.h:
+stockfish_probe/types.h:
+stockfish_probe/nnue/nnue_accumulator.h:
+stockfish_probe/nnue/nnue_architecture.h:
+stockfish_probe/nnue/features/half_ka_v2_hm.h:
+stockfish_probe/nnue/features/../../misc.h:
+stockfish_probe/nnue/features/../../types.h:
+stockfish_probe/nnue/features/../nnue_common.h:
+stockfish_probe/nnue/layers/affine_transform.h:
+stockfish_probe/nnue/layers/../nnue_common.h:
+stockfish_probe/nnue/layers/simd.h:
+stockfish_probe/nnue/layers/affine_transform_sparse_input.h:
+stockfish_probe/nnue/layers/../../bitboard.h:
+stockfish_probe/nnue/layers/clipped_relu.h:
+stockfish_probe/nnue/layers/sqr_clipped_relu.h:
+stockfish_probe/nnue/nnue_common.h:
+stockfish_probe/misc.h:

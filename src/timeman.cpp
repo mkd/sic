@@ -3,8 +3,7 @@
 namespace TimeManager {
 
 uint64_t start_time     = 0;
-uint64_t optimum_time   = 0;
-uint64_t maximum_time   = 0;
+uint64_t allocated_time = 0;
 bool stop_search        = false;
 
 uint64_t get_time_ms() {
@@ -14,20 +13,17 @@ uint64_t get_time_ms() {
 }
 
 void init_timer(int time_left_ms, int increment_ms) {
-    optimum_time = (time_left_ms / 40) + (increment_ms * 3 / 4);
-    maximum_time = time_left_ms / 3;
-    if (optimum_time > maximum_time) {
-        optimum_time = maximum_time;
+    allocated_time = (time_left_ms / 40) + (increment_ms * 3 / 4);
+    if (allocated_time > static_cast<uint64_t>(time_left_ms) / 2) {
+        allocated_time = time_left_ms / 2;
     }
     start_time = get_time_ms();
     stop_search = false;
 }
 
 void check_time() {
-    if (maximum_time != 999999999) {
-        if (get_time_ms() - start_time >= maximum_time) {
-            stop_search = true;
-        }
+    if (get_time_ms() - start_time >= allocated_time) {
+        stop_search = true;
     }
 }
 

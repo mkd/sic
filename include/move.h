@@ -19,8 +19,9 @@
 // ---------------------------------------------------------------------------
 enum MoveFlag : int {
     MOVE_FLAG_NORMAL   = 0,
-    MOVE_FLAG_ENPASSANT = 1,
-    MOVE_FLAG_CASTLING  = 2,
+    MOVE_FLAG_PROMOTION = 1,
+    MOVE_FLAG_ENPASSANT = 2,
+    MOVE_FLAG_CASTLING  = 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,9 @@ enum MoveFlag : int {
 // ---------------------------------------------------------------------------
 FORCE_INLINE constexpr Move make_move(Square from, Square to, int flag = MOVE_FLAG_NORMAL, PieceType prom = PieceType::NONE) {
     const int prom_offset = (prom == PieceType::NONE) ? 0 : (static_cast<int>(prom) - 2);
+    if (prom != PieceType::NONE && flag == MOVE_FLAG_NORMAL) {
+        flag = MOVE_FLAG_PROMOTION;
+    }
     return static_cast<Move>(
         static_cast<int>(from)
         | (static_cast<int>(to) << 6)

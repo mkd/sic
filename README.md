@@ -7,12 +7,19 @@ Sic is an ultra-high-performance, UCI-compliant chess engine written in Modern C
 ## Core Architecture
 
 * **Language:** Modern C++20 (Cross-platform support including Linux and macOS Apple Silicon).
-* **Evaluation:** NNUE (Efficiently Updatable Neural Networks). Sic uses a highly optimized C++ bridge for the Stockfish 16.1 legacy `HalfKP` architecture (20MB network: `nn-62ef826d1a6d.nnue`). It features a 256-dimension incremental accumulator that updates purely on the differences between moves, guaranteeing massive Nodes-Per-Second (NPS) throughput.
+* **Evaluation:** NNUE (Efficiently Updatable Neural Networks). Sic uses a highly optimized C++ bridge incorporating Stockfish 16.1's native `SFNNv10` architecture. It features a 2560-dimension incremental accumulator (`HalfKAv2_hm`) that updates purely on the differences between moves, guaranteeing massive Nodes-Per-Second (NPS) throughput. Supports dual-network inference (Big/Small) for lightning-fast node evaluations.
 * **Concurrency:** Lazy SMP (Symmetric Multiprocessing). Threads search the same tree concurrently, sharing data locklessly to naturally distribute the workload.
 * **Transposition Table:** 100% Lockless Hash Table with dynamic UCI resizing (`setoption name Hash`) and `hashfull` telemetry. Memory layout uses a Cache-Aligned Multi-Bucket architecture (64-byte `TTCluster` matching L1 cache lines) and Generational Aging. Features aggressive `__builtin_prefetch` instructions to hide memory access latency.
 * **Endgame Tablebases:** Seamless `Fathom` integration for 6-piece Syzygy tablebases, allowing the engine to instantly prove wins/draws/losses without searching.
-* **Board Representation:** Magic Bitboards (Carry-Rippler initialization) for blazingly fast move generation and attack detection.
-* **Time Management:** Advanced Soft/Hard limits with Node Stability Extensions. Calculates optimum search time and gracefully halts between iterative deepening iterations to preserve PV integrity.
+- Modern bitboard representation
+- Magic Bitboards for sliding piece move generation
+- Principal Variation Search (PVS) with Alpha-Beta pruning
+- Transposition Table with Zobrist hashing and built-in hardware prefetching
+- Late Move Reductions (LMR), Null Move Pruning (NMP), and Delta Pruning
+- Advanced Time Management for fast, responsive play
+- Modern NNUE Evaluation using Stockfish SFNNv10 architecture (Incremental NNUE updates)
+- Syzygy Tablebase support for flawless endgames
+- Fully UCI compliant (tested with CuteChess and Arena)
 * **Advanced Heuristics:** Features dynamic threat extractors (`checkers`, `pinners`, `blockersForKing`) calculated natively on the C++ bitboards to inform search pruning.
 
 ## Search & Pruning Features
@@ -69,4 +76,4 @@ If running directly from the terminal, Sic supports custom Stockfish-style diagn
 
     eval: Prints the raw static NNUE evaluation of the current position in centipawns.
 
-Note: Sic requires the nn-62ef826d1a6d.nnue file in its root directory to evaluate positions.
+Note: Sic requires the `nn-sfnnv10.nnue` and `nn-baff1ede1f90.nnue` files in its root directory to evaluate positions.
