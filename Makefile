@@ -54,7 +54,7 @@ CFLAGS    += -Wno-missing-field-initializers
 ifeq ($(DEBUG),1)
   CXXFLAGS += -O0 -g -DDEBUG
 else
-  CXXFLAGS += -O3 -DNDEBUG
+  CXXFLAGS += -O3 -DNDEBUG -funroll-loops
 endif
 
 # Include paths
