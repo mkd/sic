@@ -21,6 +21,8 @@ uint64_t perft(const Position& pos, int depth) {
     return nodes;
 }
 
+#include <chrono>
+
 // ---------------------------------------------------------------------------
 //  Perft Divide
 // ---------------------------------------------------------------------------
@@ -28,7 +30,9 @@ void perft_divide(const Position& pos, int depth) {
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
 
+    auto start_time = std::chrono::high_resolution_clock::now();
     uint64_t total = 0;
+    
     for (int i = 0; i < list.size(); ++i) {
         Position next_pos = pos;
         if (next_pos.make_move(list.moves[i])) {
@@ -37,5 +41,15 @@ void perft_divide(const Position& pos, int depth) {
             total += nodes;
         }
     }
-    std::cout << "Total nodes: " << total << std::endl;
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed_ms = end_time - start_time;
+    
+    double ms = elapsed_ms.count();
+    uint64_t knps = (ms > 0) ? static_cast<uint64_t>((total / ms) * 1000.0 / 1000.0) : 0;
+    
+    std::cout << "\n    Depth: " << depth << "\n"
+              << "    Nodes: " << total << "\n"
+              << "    Time:  " << ms << "ms\n"
+              << "   Speed:  " << knps << " Knps\n\n";
 }

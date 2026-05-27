@@ -534,22 +534,73 @@ std::string Position::get_fen() const {
 // ---------------------------------------------------------------------------
 //  Print Board (diagnostic command "d")
 // ---------------------------------------------------------------------------
-void Position::print() const {
-    const char piece_chars[] = "PNBRQKpnbrqk";
-    std::cout << "\n +---+---+---+---+---+---+---+---+\n";
-    for (int r = 7; r >= 0; --r) {
-        std::cout << (r + 1) << " |";
-        for (int f = 0; f < 8; ++f) {
-            Square sq = static_cast<Square>(r * 8 + f);
+void Position::print(bool flip) const {
+    const char white_chars[] = "PNBRQK";
+    const char black_chars[] = "pnbrqk";
+    
+    std::cout << "\n    +----+----+----+----+----+----+----+----+\n";
+    
+    for (int i = 0; i < 8; ++i) {
+        int r = flip ? i : 7 - i;
+        std::cout << "  " << (r + 1) << " |";
+        for (int j = 0; j < 8; ++j) {
+            int f_idx = j;
+            Square sq = static_cast<Square>(r * 8 + f_idx);
             Piece p = piece_on(sq);
-            char c = (p == Piece::PIECE_NONE) ? ' ' : piece_chars[static_cast<int>(p)];
-            std::cout << " " << c << " |";
+            
+            if (p == Piece::PIECE_NONE) {
+                std::cout << "    |";
+            } else {
+                int p_int = static_cast<int>(p);
+                if (p_int >= 0 && p_int <= 5) {
+                    std::cout << " " << white_chars[p_int] << "  |";
+                } else if (p_int >= 6 && p_int <= 11) {
+                    std::cout << " " << black_chars[p_int - 6] << "* |";
+                }
+            }
         }
-        std::cout << "\n +---+---+---+---+---+---+---+---+\n";
+        std::cout << "\n    +----+----+----+----+----+----+----+----+\n";
     }
-    std::cout << "   a   b   c   d   e   f   g   h\n\n";
-    std::cout << "Key: " << std::hex << zobristKey << std::dec << "\n";
-    std::cout << "Checkers: " << checkers.bb << "\n";
+    
+    std::cout << "  ";
+    for (int j = 0; j < 8; ++j) {
+        int f_idx = j;
+        std::cout << "    " << (char)('a' + f_idx);
+    }
+    std::cout << "\n\n";
+    
+    std::cout << "  Fen:    " << get_fen() << "\n";
+    std::cout << "  Key:    " << std::hex << std::uppercase << zobristKey << std::dec << "\n";
+    std::cout << "  Side:   " << (sideToMove == Color::WHITE ? "White" : "Black") << "\n";
+    
+    std::string epsq_str = "-";
+    if (epSquare != Square::SQ_NONE) {
+        epsq_str = "";
+        int sq_int = static_cast<int>(epSquare);
+        epsq_str += static_cast<char>('a' + (sq_int % 8));
+        epsq_str += static_cast<char>('1' + (sq_int / 8));
+    }
+    std::cout << "  Epsq:   " << epsq_str << "\n";
+    
+    std::string castle_str = "";
+    if (castlingRights & WHITE_OO) castle_str += "K";
+    if (castlingRights & WHITE_OOO) castle_str += "Q";
+    if (castlingRights & BLACK_OO) castle_str += "k";
+    if (castlingRights & BLACK_OOO) castle_str += "q";
+    if (castle_str.empty()) castle_str = "-";
+    std::cout << "  Castle: " << castle_str << "\n";
+    
+    std::cout << "  Checkers: ";
+    if (checkers.bb) {
+        Bitboard c = checkers;
+        while(c.bb) {
+            Square sq = pop_lsb(c);
+            int sq_int = static_cast<int>(sq);
+            std::cout << static_cast<char>('a' + (sq_int % 8)) << static_cast<char>('1' + (sq_int / 8)) << " ";
+        }
+    }
+    std::cout << "\n";
+    
     std::cout << std::flush;
 }
 

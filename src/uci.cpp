@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 //  Global Search Thread
 // ---------------------------------------------------------------------------
-static std::thread search_thread;
+std::thread search_thread;
 
 // ---------------------------------------------------------------------------
 //  Global Position
@@ -185,117 +185,183 @@ static void parse_go(const std::string& args) {
 // ---------------------------------------------------------------------------
 //  UCI Main Loop
 // ---------------------------------------------------------------------------
-void uci_loop() {
+bool g_flip_board = false;
+
+// Quick MVV LVA for smoves
+static int get_mvv_lva(const Position& pos, Move m) {
+    Piece p_attacker = pos.piece_on(move_from(m));
+    Piece p_victim = pos.piece_on(move_to(m));
+    
+    PieceType attacker = p_attacker == Piece::PIECE_NONE ? PieceType::NONE : static_cast<PieceType>((static_cast<int>(p_attacker) % 6) + 1);
+    PieceType victim = p_victim == Piece::PIECE_NONE ? PieceType::NONE : static_cast<PieceType>((static_cast<int>(p_victim) % 6) + 1);
+    
+    if (move_flag(m) == MOVE_FLAG_ENPASSANT) {
+        victim = PieceType::PAWN;
+    }
+    int score = 0;
+    if (victim != PieceType::NONE) {
+        score = 100 * static_cast<int>(victim) - static_cast<int>(attacker);
+    }
+    if (move_flag(m) == MOVE_FLAG_PROMOTION) {
+        score += 800; // rough queen value
+    }
+    return score;
+}
+
+bool uci_execute_line(const std::string& line) {
+    if (line.empty()) return true;
+
+    std::istringstream iss(line);
+    std::string cmd;
+    iss >> cmd;
+
+    if (cmd == "uci") {
+        std::cout << "id name Sic" << std::endl;
+        std::cout << "id author Claudio M. Camacho <claudiomkd@gmail.com>" << std::endl;
+        std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
+        std::cout << "option name Clear Hash type button" << std::endl;
+        std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
+        std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
+        std::cout << "uciok" << std::endl;
+    } else if (cmd == "isready") {
+        std::cout << "readyok" << std::endl;
+    } else if (cmd == "ucinewgame") {
+        TimeManager::stop_search = false;
+        clear_tt();
+        g_gameHistory.clear();
+        std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
+        std::cout << "option name Clear Hash type button" << std::endl;
+        std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
+        std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
+    } else if (cmd == "setoption") {
+        std::string rest;
+        std::getline(iss, rest);
+
+        std::string name;
+        std::string value;
+
+        std::istringstream opt_iss(rest);
+        std::string token;
+        bool reading_name = false;
+        bool reading_value = false;
+        while (opt_iss >> token) {
+            if (token == "name") {
+                reading_name = true;
+                reading_value = false;
+                name.clear();
+            } else if (token == "value") {
+                reading_value = true;
+                reading_name = false;
+                value.clear();
+            } else if (reading_name) {
+                if (!name.empty()) name += ' ';
+                name += token;
+            } else if (reading_value) {
+                if (!value.empty()) value += ' ';
+                value += token;
+            }
+        }
+
+        if (name == "EvalFile") {
+            evalFile = value;
+            Stockfish::Probe::init(evalFile.c_str(), "nn-baff1ede1f90.nnue");
+        } else if (name == "Threads") {
+            ThreadPool::set_thread_count(std::stoi(value));
+        } else if (name == "Hash") {
+            init_tt(std::stoi(value));
+        } else if (name == "Clear Hash") {
+            clear_tt();
+        } else if (name == "SyzygyPath") {
+            if (tb_init(value.c_str())) {
+                std::cout << "info string Syzygy tablebases initialized (Up to " << TB_LARGEST << " pieces)" << std::endl;
+            } else {
+                std::cout << "info string Failed to initialize Syzygy tablebases at " << value << std::endl;
+            }
+        }
+    } else if (cmd == "position") {
+        std::string rest;
+        std::getline(iss, rest);
+        parse_position(rest);
+    } else if (cmd == "go") {
+        std::string rest;
+        std::getline(iss, rest);
+        parse_go(rest);
+    } else if (cmd == "help") {
+        std::cout << "Help:\n"
+                  << "- d: display the current position on the board\n"
+                  << "- eval: print the static evaluation for the current position\n"
+                  << "- flip: flip the board when being printed\n"
+                  << "- moves: print the list of pseudo-legal moves, without being sorted\n"
+                  << "- smoves: print the list of pseudo-legal moves, sorted by score\n";
+    } else if (cmd == "flip") {
+        g_flip_board = !g_flip_board;
+        g_pos.print(g_flip_board);
+        int eval_val = evaluate(g_pos);
+        if (g_pos.sideToMove == Color::BLACK) eval_val = -eval_val;
+        std::cout << "  Eval: " << (eval_val > 0 ? "+" : "") << (eval_val / 100.0) << "\n\n";
+    } else if (cmd == "d" || cmd == "eval") {
+        g_pos.print(g_flip_board);
+        int eval_val = evaluate(g_pos);
+        if (g_pos.sideToMove == Color::BLACK) eval_val = -eval_val;
+        std::cout << "  Eval: " << (eval_val > 0 ? "+" : "") << (eval_val / 100.0) << "\n\n";
+    } else if (cmd == "moves") {
+        MoveList list;
+        MoveGen::generate_legal_moves(g_pos, list);
+        for (int i = 0; i < list.size(); ++i) {
+            std::cout << move_to_str(list.moves[i]) << "\n";
+        }
+    } else if (cmd == "smoves") {
+        MoveList list;
+        MoveGen::generate_legal_moves(g_pos, list);
+        int scores[MAX_MOVES];
+        for (int i = 0; i < list.size(); ++i) {
+            scores[i] = get_mvv_lva(g_pos, list.moves[i]);
+        }
+        for (int i = 1; i < list.size(); ++i) {
+            int key_score = scores[i];
+            Move key_move = list.moves[i];
+            int j = i - 1;
+            while (j >= 0 && scores[j] < key_score) {
+                scores[j + 1] = scores[j];
+                list.moves[j + 1] = list.moves[j];
+                j--;
+            }
+            scores[j + 1] = key_score;
+            list.moves[j + 1] = key_move;
+        }
+        for (int i = 0; i < list.size(); ++i) {
+            std::cout << move_to_str(list.moves[i]) << " (" << scores[i] << ")\n";
+        }
+    } else if (cmd == "stop") {
+        TimeManager::stop_search = true;
+    } else if (cmd == "quit") {
+        TimeManager::stop_search = true;
+        if (search_thread.joinable()) {
+            search_thread.join();
+        }
+        return false;
+    }
+
+    std::cout.flush();
+    return true;
+}
+
+void uci_init() {
     Stockfish::Probe::init("nn-sfnnv10.nnue", "nn-baff1ede1f90.nnue");
     Stockfish::Incremental::init();
 
     g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     Stockfish::Incremental::setup_reset("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+}
+
+void uci_loop() {
 
     std::string line;
 
     while (std::getline(std::cin, line)) {
-        if (line.empty()) continue;
-
-        std::istringstream iss(line);
-        std::string cmd;
-        iss >> cmd;
-
-        if (cmd == "uci") {
-            std::cout << "id name Sic" << std::endl;
-            std::cout << "id author Claudio M. Camacho <claudiomkd@gmail.com>" << std::endl;
-            std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
-            std::cout << "option name Clear Hash type button" << std::endl;
-            std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
-            std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
-            std::cout << "uciok" << std::endl;
-        } else if (cmd == "isready") {
-            std::cout << "readyok" << std::endl;
-        } else if (cmd == "ucinewgame") {
-            TimeManager::stop_search = false;
-            clear_tt();
-            g_gameHistory.clear();
-            std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
-            std::cout << "option name Clear Hash type button" << std::endl;
-            std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
-            std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
-        } else if (cmd == "setoption") {
-            std::string rest;
-            std::getline(iss, rest);
-
-            std::string name;
-            std::string value;
-
-            std::istringstream opt_iss(rest);
-            std::string token;
-            bool reading_name = false;
-            bool reading_value = false;
-            while (opt_iss >> token) {
-                if (token == "name") {
-                    reading_name = true;
-                    reading_value = false;
-                    name.clear();
-                } else if (token == "value") {
-                    reading_value = true;
-                    reading_name = false;
-                    value.clear();
-                } else if (reading_name) {
-                    if (!name.empty()) name += ' ';
-                    name += token;
-                } else if (reading_value) {
-                    if (!value.empty()) value += ' ';
-                    value += token;
-                }
-            }
-
-            if (name == "EvalFile") {
-                evalFile = value;
-                Stockfish::Probe::init(evalFile.c_str(), "nn-baff1ede1f90.nnue");
-            } else if (name == "Threads") {
-                ThreadPool::set_thread_count(std::stoi(value));
-            } else if (name == "Hash") {
-                init_tt(std::stoi(value));
-            } else if (name == "Clear Hash") {
-                clear_tt();
-            } else if (name == "SyzygyPath") {
-                if (tb_init(value.c_str())) {
-                    std::cout << "info string Syzygy tablebases initialized (Up to " << TB_LARGEST << " pieces)" << std::endl;
-                } else {
-                    std::cout << "info string Failed to initialize Syzygy tablebases at " << value << std::endl;
-                }
-            }
-        } else if (cmd == "position") {
-            std::string rest;
-            std::getline(iss, rest);
-            parse_position(rest);
-        } else if (cmd == "go") {
-            std::string rest;
-            std::getline(iss, rest);
-            parse_go(rest);
-        } else if (cmd == "d") {
-            g_pos.print();
-            std::cout << "FEN: " << g_pos.get_fen() << "\n";
-            MoveList list;
-            MoveGen::generate_legal_moves(g_pos, list);
-            std::cout << "Legal moves: ";
-            for (int i = 0; i < list.size(); ++i) {
-                std::cout << move_to_str(list.moves[i]) << "(" << list.moves[i] << ") ";
-            }
-            std::cout << "\n";
-        } else if (cmd == "eval") {
-            std::cout << "Static Evaluation: " << evaluate(g_pos) << " cp\n";
-            std::cout << "FEN: " << g_pos.get_fen() << "\n";
-        } else if (cmd == "stop") {
-            TimeManager::stop_search = true;
-        } else if (cmd == "quit") {
-            TimeManager::stop_search = true;
-            if (search_thread.joinable()) {
-                search_thread.join();
-            }
-            return;
+        if (!uci_execute_line(line)) {
+            break;
         }
-
-        std::cout.flush();
     }
 
     // Clean up if we break out of the loop (e.g., EOF)
