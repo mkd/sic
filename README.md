@@ -7,20 +7,10 @@ Sic is an ultra-high-performance, UCI-compliant chess engine written in Modern C
 ## Core Architecture
 
 * **Language:** Modern C++20 (Cross-platform support including Linux and macOS Apple Silicon).
-* **Evaluation:** NNUE (Efficiently Updatable Neural Networks). Sic uses a highly optimized C++ bridge incorporating Stockfish 16.1's native `SFNNv10` architecture. It features a 2560-dimension incremental accumulator (`HalfKAv2_hm`) that updates purely on the differences between moves, guaranteeing massive Nodes-Per-Second (NPS) throughput. Supports dual-network inference (Big/Small) for lightning-fast node evaluations.
-* **Concurrency:** Lazy SMP (Symmetric Multiprocessing). Threads search the same tree concurrently, sharing data locklessly to naturally distribute the workload.
-* **Transposition Table:** 100% Lockless Hash Table with dynamic UCI resizing (`setoption name Hash`) and `hashfull` telemetry. Memory layout uses a Cache-Aligned Multi-Bucket architecture (64-byte `TTCluster` matching L1 cache lines) and Generational Aging. Features aggressive `__builtin_prefetch` instructions to hide memory access latency.
+* **Evaluation:** NNUE (Efficiently Updatable Neural Networks). Sic uses a highly optimized C++ bridge incorporating Stockfish 16.1's native `SFNNv10` architecture. It features a 2560-dimension incremental accumulator (`HalfKAv2_hm`) that updates purely on the differences between moves, guaranteeing massive Nodes-Per-Second (NPS) throughput. Supports dual-network inference (Big/Small), defaulting to the fast 3.4MB Small network (`nn-baff1ede1f90.nnue`) for lightning-fast node evaluations, configurable via UCI options.
+* **Concurrency:** Lazy SMP (Symmetric Multiprocessing) up to 128 threads. Threads search the same tree concurrently, utilizing Root Move Rotations to naturally distribute workloads and prevent TT cache thrashing, allowing scaling to millions of nodes per second.
+* **Transposition Table:** 100% Lockless Hash Table with dynamic UCI resizing (`setoption name Hash`) and `hashfull` telemetry. Features TT Draw Bug prevention (safeguarding exact bounds on repetitions) and aggressive `__builtin_prefetch` instructions to hide memory access latency.
 * **Endgame Tablebases:** Seamless `Fathom` integration for 6-piece Syzygy tablebases, allowing the engine to instantly prove wins/draws/losses without searching.
-- Modern bitboard representation
-- Magic Bitboards for sliding piece move generation
-- Principal Variation Search (PVS) with Alpha-Beta pruning
-- Transposition Table with Zobrist hashing and built-in hardware prefetching
-- Late Move Reductions (LMR), Null Move Pruning (NMP), and Delta Pruning
-- Advanced Time Management for fast, responsive play
-- Modern NNUE Evaluation using Stockfish SFNNv10 architecture (Incremental NNUE updates)
-- Syzygy Tablebase support for flawless endgames
-- Fully UCI compliant (tested with CuteChess and Arena)
-* **Advanced Heuristics:** Features dynamic threat extractors (`checkers`, `pinners`, `blockersForKing`) calculated natively on the C++ bitboards to inform search pruning.
 
 ## Search & Pruning Features
 Sic features a highly aggressive, state-of-the-art search tree designed to heavily prune unpromising branches and maximize depth penetration:
@@ -29,7 +19,6 @@ Sic features a highly aggressive, state-of-the-art search tree designed to heavi
 * **Principal Variation Search (PVS / NegaScout):** Assumes perfect move ordering to search the first move with a full window and subsequent moves with ultra-fast zero-windows.
 * **Aspiration Windows:** Searches at the root are conducted with a narrow window around the previous iteration's score, rapidly proving fail-highs or fail-lows to prune the tree early.
 * **Iterative Deepening:** Progressively deepens the search to ensure the best move is available if time runs out.
-* **Internal Iterative Deepening (IID):** At deep nodes missing a TT entry, dynamically executes a shallow search explicitly to find a good principal variation move rather than relying on static ordering.
 * **Quiescence Search (QS):** Resolves tactical sequences at the end of the main search to avoid the horizon effect. Features **Delta Pruning** to outright prune captures that mathematically cannot raise the score above alpha.
 
 ### Move Ordering
@@ -41,15 +30,15 @@ Sic features a highly aggressive, state-of-the-art search tree designed to heavi
 * **History Heuristic (Butterfly Boards):** Dynamically rewards quiet moves that cause cutoffs globally across the search tree, penalizing those that fail.
 
 ### Forward Pruning & Reductions
-* **ProbCut:** The main search executes shallow, high-beta searches (`beta + 200`) at deep nodes. If this heavily biased search fails high, we probabilistically assume the full-depth search will fail high, cutting off massive chunks of the tree early.
-* **Dynamic Null Move Pruning (NMP):** Passes the turn to the opponent to prove a position is overwhelmingly winning. The depth reduction is scaled dynamically with search depth (`R = 3 + depth / 4`).
+* **ProbCut:** High-beta searches (`beta + 200`) at deep nodes. If this heavily biased search fails high, we probabilistically assume the full-depth search will fail high, cutting off massive chunks of the tree.
+* **Dynamic Null Move Pruning (NMP):** Passes the turn to the opponent to prove a position is overwhelmingly winning. The depth reduction is scaled dynamically.
 * **Reverse Futility Pruning (RFP / Static NMP):** Instantly returns static evaluation if the position is far above the beta threshold.
-* **Razoring:** At very low depths, if the static evaluation is significantly below the alpha threshold, immediately drops into Quiescence Search to prune unpromising subtrees.
-* **Futility Pruning (FP) & Late Move Pruning (LMP):** Skips quiet moves at low depths that cannot mathematically improve the position or are too far down the ordered list.
-* **Logarithmic Late Move Reductions (LMR):** Aggressively reduces the search depth of late-ordered moves based on a mathematically principled logarithmic formula. This reduction is softened for moves with a very high historical success rate.
+* **Razoring:** At very low depths, if the static evaluation is significantly below the alpha threshold, immediately drops into Quiescence Search.
+* **Futility Pruning (FP) & Late Move Pruning (LMP):** Skips quiet moves at low depths that cannot mathematically improve the position.
+* **Logarithmic Late Move Reductions (LMR):** Aggressively reduces the search depth of late-ordered moves based on a mathematically principled logarithmic formula.
 * **History Pruning:** Outright prunes quiet moves at low depths if they have a terribly negative historical success rate.
-* **Static Exchange Evaluation (SEE) Pruning:** Simulates captures statically to prune materially losing sequences in both the Main Search and Quiescence Search.
-* **Improving Heuristic:** Dynamically relaxes pruning margins if the position's static evaluation is worsening compared to two plies ago.
+* **Static Exchange Evaluation (SEE) Pruning:** Simulates captures statically to prune materially losing sequences.
+* **Improving Heuristic:** Dynamically relaxes pruning margins if the position's static evaluation is worsening.
 
 ## Compiling and Running
 
@@ -60,20 +49,25 @@ Sic features a highly aggressive, state-of-the-art search tree designed to heavi
 **Build:**
 ```bash
 make build -j
+```
 
-Running (UCI Mode):
+**Running (UCI Mode):**
 Sic is designed to be plugged into any standard UCI GUI (like Cute Chess, Arena, or En Croissant).
-Bash
-
+```bash
 ./sic
 ```
 
-Internal Diagnostic Commands
+**Single-Shot Commands:**
+Sic can execute CLI commands and exit immediately:
+```bash
+./sic go perft 6
+./sic go movetime 5000
+```
 
-If running directly from the terminal, Sic supports custom Stockfish-style diagnostic commands:
+**Internal Diagnostic Commands:**
+If running directly from the terminal, Sic supports custom diagnostic commands:
+* `d`: Displays a high-quality ASCII representation of the current board, FEN string, and Zobrist Key.
+* `eval`: Prints the raw static NNUE evaluation of the current position in centipawns.
+* `moves` / `smoves`: Prints the legal moves generated for the position.
 
-    d: Displays a high-quality ASCII representation of the current board, FEN string, Zobrist Key, and Checkers bitboard.
-
-    eval: Prints the raw static NNUE evaluation of the current position in centipawns.
-
-Note: Sic requires the `nn-sfnnv10.nnue` and `nn-baff1ede1f90.nnue` files in its root directory to evaluate positions.
+*Note: Sic requires the `nn-baff1ede1f90.nnue` file in its root directory to evaluate positions.*
