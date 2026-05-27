@@ -221,7 +221,7 @@ bool uci_execute_line(const std::string& line) {
         std::cout << "option name Threads type spin default 9 min 1 max 128" << std::endl;
         std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
         std::cout << "option name Clear Hash type button" << std::endl;
-        std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
+        std::cout << "option name EvalFile type string default nn-baff1ede1f90.nnue" << std::endl;
         std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
         std::cout << "uciok" << std::endl;
     } else if (cmd == "isready") {
@@ -344,7 +344,7 @@ bool uci_execute_line(const std::string& line) {
 }
 
 void uci_init() {
-    Stockfish::Probe::init("nn-sfnnv10.nnue", "nn-baff1ede1f90.nnue");
+    Stockfish::Probe::init("nn-baff1ede1f90.nnue", "nn-baff1ede1f90.nnue");
     Stockfish::Incremental::init();
 
     g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");

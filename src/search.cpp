@@ -561,13 +561,12 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
     Move best_root_move = MOVE_NONE;
     // Move last_best_move = MOVE_NONE;
     // int best_move_stability = 0;
-    SearchWorker sw;
+    SearchWorker& sw = ThreadPool::threads[thread_id]->sw;
+    sw.node_count = 0;
     Value prev_score = 0;
 
     for (int d = 1; d <= max_depth; ++d) {
         if (TimeManager::stop_search) break;
-
-        sw.node_count = 0;
 
         Value alpha = -VALUE_MATE_IN_1;
         Value beta = VALUE_MATE_IN_1;
@@ -653,8 +652,13 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
                 pv_str += " " + move_to_str(sw.pv_array[0][j]);
             }
 
+            uint64_t total_nodes = 0;
+            for (auto* t : ThreadPool::threads) {
+                total_nodes += t->sw.node_count;
+            }
+
             uint64_t elapsed = TimeManager::get_time_ms() - TimeManager::start_time;
-            uint64_t nps = (elapsed > 0) ? (sw.node_count * 1000) / elapsed : 0;
+            uint64_t nps = (elapsed > 0) ? (total_nodes * 1000) / elapsed : 0;
             
             std::string score_str;
             if (is_mate(best_value)) {
@@ -668,7 +672,7 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
             std::cout << "info depth " << d
                        << " " << score_str
                        << " time " << elapsed
-                       << " nodes " << sw.node_count
+                       << " nodes " << total_nodes
                        << " nps " << nps
                        << " hashfull " << get_hashfull()
                        << " pv" << pv_str << std::endl;
