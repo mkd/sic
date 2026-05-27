@@ -81,7 +81,7 @@ enum class Piece : int8_t {
 };
 
 inline constexpr Piece make_piece(Color c, PieceType pt) {
-    return static_cast<Piece>(static_cast<int8_t>(c) * 6 + static_cast<int8_t>(pt));
+    return static_cast<Piece>(static_cast<int8_t>(c) * 6 + static_cast<int8_t>(pt) - 1);
 }
 
 inline constexpr Color color_of(Piece pc) {

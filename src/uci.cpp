@@ -229,10 +229,6 @@ bool uci_execute_line(const std::string& line) {
         TimeManager::stop_search = false;
         clear_tt();
         g_gameHistory.clear();
-        std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
-        std::cout << "option name Clear Hash type button" << std::endl;
-        std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
-        std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
     } else if (cmd == "setoption") {
         std::string rest;
         std::getline(iss, rest);
