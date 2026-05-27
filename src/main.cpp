@@ -11,16 +11,16 @@
 extern std::thread search_thread;
 
 int main(int argc, char* argv[]) {
+    // Startup info
+    std::cout << "Sic 1.0 by Claudio M. Camacho <claudiomkd@gmail.com>\n";
+    std::cout << "Hash table initialized with " << (4096ull * 1024 * 1024 / sizeof(TTCluster)) * 4 << " entries (4096 MBytes)\n\n";
+
     init_attacks();
     init_zobrist();
     init_tt(4096);
     init_lmr();
     ThreadPool::init();
     uci_init();
-
-    // Startup info
-    std::cout << "Sic 1.0 by Claudio M. Camacho <claudiomkd@gmail.com>\n";
-    std::cout << "Hash table initialized with " << (4096ull * 1024 * 1024 / sizeof(TTCluster)) * 4 << " entries (4096 MBytes)\n";
 
     if (argc > 1) {
         std::string cmd = "";
