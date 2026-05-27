@@ -587,6 +587,12 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
             MoveGen::generate_legal_moves(pos, list);
             sort_moves(pos, list, best_root_move, sw, 0, MOVE_NONE); // Use best_root_move instead of MOVE_NONE for TT move
 
+            // Lazy SMP: perturb root move order for helper threads to avoid TT lock contention
+            if (thread_id > 0 && list.size() > 1) {
+                int shift = thread_id % list.size();
+                std::rotate(list.moves, list.moves + shift, list.moves + list.size());
+            }
+
             best_value = -VALUE_INFINITE;
             int legal_moves = 0;
 

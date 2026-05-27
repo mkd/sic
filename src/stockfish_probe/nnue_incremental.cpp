@@ -266,15 +266,6 @@ void do_move(int move, StateInfo *new_si) {
   } else {
     new_si->rule50 = global_pos.st->previous->rule50 + 1;
   }
-
-  // CRITICAL FIX:
-  // If King moved, we MUST eagerly update the accumulator.
-  // HalfKA architecture requires a Refresh when King moves (changing buckets).
-  // Refresh requires the Board to match the State.
-  // Since we don't support Board Rollback for lazy eval, we must do it NOW.
-  if (type_of(sf_piece) == KING) {
-    evaluate();
-  }
 }
 
 void do_null_move(StateInfo *new_si) {

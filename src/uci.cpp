@@ -218,6 +218,7 @@ bool uci_execute_line(const std::string& line) {
     if (cmd == "uci") {
         std::cout << "id name Sic" << std::endl;
         std::cout << "id author Claudio M. Camacho <claudiomkd@gmail.com>" << std::endl;
+        std::cout << "option name Threads type spin default 9 min 1 max 128" << std::endl;
         std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
         std::cout << "option name Clear Hash type button" << std::endl;
         std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
