@@ -335,10 +335,12 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (tt_score >= VALUE_MATE - 500) tt_score -= ply;
         else if (tt_score <= -VALUE_MATE + 500) tt_score += ply;
 
-        // 2. Evaluate bounds strictly
-        if (tt_flag == TT_EXACT) return tt_score;
-        if (tt_flag == TT_ALPHA && tt_score <= alpha) return alpha;
-        if (tt_flag == TT_BETA && tt_score >= beta) return beta;
+        // 2. Evaluate bounds strictly (Prevent TT Draw Bug by ignoring cutoffs for exactly 0.0)
+        if (tt_score != 0) {
+            if (tt_flag == TT_EXACT) return tt_score;
+            if (tt_flag == TT_ALPHA && tt_score <= alpha) return alpha;
+            if (tt_flag == TT_BETA && tt_score >= beta) return beta;
+        }
     }
 
     // Singular Extension (SE)
