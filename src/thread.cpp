@@ -11,7 +11,11 @@ namespace ThreadPool {
 std::vector<Thread*> threads;
 
 void init() {
-    set_thread_count(1);
+    unsigned int hw_threads = std::thread::hardware_concurrency();
+    // Default to half the logical cores (usually the number of physical cores)
+    // to avoid starving the OS, with a minimum of 1 thread.
+    unsigned int default_threads = (hw_threads > 1) ? hw_threads / 2 : 1;
+    set_thread_count(default_threads);
 }
 
 void set_thread_count(int count) {
