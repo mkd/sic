@@ -333,11 +333,11 @@ void undo_move(int /*move*/) {
   global_pos.st = prev_si;
 }
 
-int evaluate() {
+int evaluate(bool force_small) {
   // Call Stockfish Eval
   // Note: verify if evaluate expects side to move matching pos?
   // Yes, evaluate(pos) handles it.
-  return Eval::evaluate(global_pos);
+  return Eval::evaluate(global_pos, force_small);
 }
 } // namespace Incremental
 } // namespace Stockfish

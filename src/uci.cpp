@@ -344,7 +344,7 @@ bool uci_execute_line(const std::string& line) {
 }
 
 void uci_init() {
-    Stockfish::Probe::init("nn-baff1ede1f90.nnue", "nn-baff1ede1f90.nnue");
+    Stockfish::Probe::init("nn-b1a57edbea57.nnue", "nn-baff1ede1f90.nnue");
     Stockfish::Incremental::init();
 
     g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");

@@ -12,8 +12,8 @@ const int PieceValues[7] = {
     0     // KING
 };
 
-Value evaluate(const Position& pos) {
-    int eval = Stockfish::Incremental::evaluate();
+Value evaluate(const Position& pos, bool force_small) {
+    int eval = Stockfish::Incremental::evaluate(force_small);
     // Tapering based on halfmoveClock for 50-move rule scaling
     return eval * (100 - pos.halfmoveClock) / 100;
 }

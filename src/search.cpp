@@ -128,13 +128,13 @@ static Bitboard get_attackers(const Position& pos, Square sq, Bitboard occupied)
 static bool see_ge(const Position& pos, Move m, int threshold) {
     Square from = move_from(m);
     Square to = move_to(m);
-    int swap_val = PieceValues[static_cast<int>(piece_type(pos.piece_on(to)))] - threshold;
-    if (swap_val < 0) return false;
+    int swap = PieceValues[static_cast<int>(piece_type(pos.piece_on(to)))] - threshold;
+    if (swap < 0) return false;
 
     PieceType attacker_type = piece_type(pos.piece_on(from));
     if (move_prom(m) != PieceType::NONE) attacker_type = move_prom(m);
-    swap_val -= PieceValues[static_cast<int>(attacker_type)];
-    if (swap_val >= 0) return true;
+    swap = PieceValues[static_cast<int>(attacker_type)] - swap;
+    if (swap <= 0) return true;
 
     Bitboard occupied = pos.occupied();
     occupied.bb ^= (1ULL << static_cast<int>(from));
@@ -142,11 +142,12 @@ static bool see_ge(const Position& pos, Move m, int threshold) {
     if (piece_type(pos.piece_on(to)) == PieceType::NONE && attacker_type == PieceType::PAWN) {
         Square ep_sq = pos.sideToMove == Color::WHITE ? static_cast<Square>(static_cast<int>(to) - 8) : static_cast<Square>(static_cast<int>(to) + 8);
         occupied.bb ^= (1ULL << static_cast<int>(ep_sq));
-        swap_val += PieceValues[static_cast<int>(PieceType::PAWN)];
+        swap += PieceValues[static_cast<int>(PieceType::PAWN)];
     }
 
     Bitboard attackers = get_attackers(pos, to, occupied);
     Color us = ~pos.sideToMove;
+    Color original_stm = pos.sideToMove;
 
     while (true) {
         Bitboard our_attackers = {attackers.bb & pos.pieces(us).bb};
@@ -168,11 +169,13 @@ static bool see_ge(const Position& pos, Move m, int threshold) {
             attackers.bb |= get_attackers(pos, to, occupied).bb;
         }
 
-        swap_val = -swap_val - 1 - PieceValues[static_cast<int>(pt)];
+        swap = PieceValues[static_cast<int>(pt)] - swap;
+        if (swap < 0) {
+            return us != original_stm; // Return true if the player who cannot make the capture is the original defender
+        }
         us = ~us;
-        if (swap_val >= 0) return true;
     }
-    return false;
+    return us != original_stm; // If loop breaks due to no attackers, the current player 'us' failed to capture. Return true if 'us' is the defender.
 }
 
 // ---------------------------------------------------------------------------
@@ -221,7 +224,22 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
 
     bool in_check = pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove);
 
-    Value stand_pat = evaluate(pos);
+    Value tt_score;
+    Move tt_move = MOVE_NONE;
+    TTFlag tt_flag;
+    if (probe_tt(pos.zobristKey, 0, alpha, beta, tt_score, tt_move, tt_flag)) {
+        return tt_score;
+    }
+
+    Value stand_pat = -VALUE_INFINITE;
+    if (!in_check) {
+        stand_pat = evaluate(pos, false);
+        if (stand_pat >= beta) {
+            record_tt(pos.zobristKey, 0, stand_pat, TT_BETA, MOVE_NONE);
+            return beta;
+        }
+        if (stand_pat > alpha) alpha = stand_pat;
+    }
 
     MoveList list;
     MoveGen::generate_legal_moves(pos, list);
@@ -231,10 +249,11 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
         return -(VALUE_MATE - ply);
     }
 
-    if (stand_pat >= beta) return beta;
-    if (stand_pat > alpha) alpha = stand_pat;
+    sort_moves(pos, list, tt_move, sw, 0, MOVE_NONE);
 
-    sort_moves(pos, list, MOVE_NONE, sw, 0, MOVE_NONE);
+    Value best_value = stand_pat;
+    Move best_move = MOVE_NONE;
+    TTFlag flag = TT_ALPHA;
 
     for (int i = 0; i < list.size(); ++i) {
         if (!in_check && pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
@@ -256,11 +275,22 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
         NnueGuard guard(list.moves[i]);
         Value val = -quiescence(next_pos, -beta, -alpha, ply + 1, sw);
 
-        if (val >= beta) return beta;
-        if (val > alpha) alpha = val;
+        if (val > best_value) {
+            best_value = val;
+            best_move = list.moves[i];
+        }
+        if (val > alpha) {
+            alpha = val;
+            flag = TT_EXACT;
+        }
+        if (alpha >= beta) {
+            flag = TT_BETA;
+            break;
+        }
     }
 
-    return alpha;
+    record_tt(pos.zobristKey, 0, best_value, flag, best_move);
+    return best_value;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +308,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         TimeManager::check_time();
         if (TimeManager::stop_search) return 0;
     }
+
+    bool pv_node = (beta - alpha) > 1;
 
     if (depth == 0) {
         return quiescence(pos, alpha, beta, ply, sw);
@@ -317,7 +349,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     bool in_check = pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove);
-    Value static_eval = evaluate(pos);
+    Value static_eval = evaluate(pos, false);
     sw.static_evals[ply] = static_eval;
 
     bool improving = false;
@@ -338,8 +370,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         // 2. Evaluate bounds strictly (Prevent TT Draw Bug by ignoring cutoffs for exactly 0.0)
         if (tt_score != 0) {
             if (tt_flag == TT_EXACT) return tt_score;
-            if (tt_flag == TT_ALPHA && tt_score <= alpha) return alpha;
-            if (tt_flag == TT_BETA && tt_score >= beta) return beta;
+            if (tt_flag == TT_ALPHA && tt_score <= alpha) return tt_score;
+            if (tt_flag == TT_BETA && tt_score >= beta) return tt_score;
         }
     }
 
@@ -352,7 +384,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     // Reverse Futility Pruning (Static NMP)
-    if (!is_null && depth <= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
+    if (!pv_node && !is_null && depth <= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
         int rfp_margin = improving ? depth * 75 : depth * 100;
         if (static_eval - rfp_margin >= beta) {
             return static_eval;
@@ -360,7 +392,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     // ProbCut
-    if (!is_null && depth >= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
+    if (!pv_node && !is_null && depth >= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
         Value prob_beta = beta + 200;
         Value pc_score = negamax(pos, depth - 4, ply, prob_beta - 1, prob_beta, false, sw, prev_move, excluded_move);
         if (pc_score >= prob_beta) {
@@ -369,7 +401,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     // Razoring
-    if (!is_null && depth <= 3 && !in_check && abs(beta) < VALUE_MATE - 500) {
+    if (!pv_node && !is_null && depth <= 3 && !in_check && abs(beta) < VALUE_MATE - 500) {
         int razor_margin = depth * 300;
         if (static_eval + razor_margin <= alpha) {
             Value qval = quiescence(pos, alpha, beta, ply, sw);
@@ -378,26 +410,28 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     // Dynamic Null Move Pruning
-    if (!is_null && depth >= 3 && ply > 0 && static_eval >= beta && !in_check) {
-        int r = 3 + depth / 4;
-        int nmp_depth = depth - r;
-        if (nmp_depth < 0) nmp_depth = 0;
-        
-        Position null_pos = pos;
-        null_pos.make_null_move();
-        NnueGuard guard(0, true);
-        Value null_val = -negamax(null_pos, nmp_depth, ply + 1, -beta, -beta + 1, true, sw, MOVE_NONE);
-        if (null_val >= beta) return beta;
+    if (!pv_node && !is_null && depth >= 3 && ply > 0 && static_eval >= beta && !in_check) {
+        if ((pos.pieces(pos.sideToMove) & ~(pos.pieces(PieceType::PAWN) | pos.pieces(PieceType::KING))).bb != 0) {
+            int r = 3 + depth / 6;
+            int nmp_depth = depth - r - 1;
+            if (nmp_depth < 0) nmp_depth = 0;
+            
+            Position null_pos = pos;
+            null_pos.make_null_move();
+            NnueGuard guard(0, true);
+            Value null_val = -negamax(null_pos, nmp_depth, ply + 1, -beta, -beta + 1, true, sw, MOVE_NONE);
+            if (null_val >= beta) return beta;
+        }
     }
 
     // Internal Iterative Deepening (IID)
-    if (depth >= 6 && tt_move == MOVE_NONE && !is_null) {
+    if (pv_node && depth >= 6 && tt_move == MOVE_NONE && !is_null) {
         int iid_depth = depth - 2;
         negamax(pos, iid_depth, ply, alpha, beta, is_null, sw, prev_move, excluded_move);
         Value dummy_score;
         TTFlag dummy_flag;
         probe_tt(pos.zobristKey, 0, alpha, beta, dummy_score, tt_move, dummy_flag);
-    } else if (depth >= 4 && tt_move == MOVE_NONE) {
+    } else if (pv_node && depth >= 3 && tt_move == MOVE_NONE) {
         depth--;
     }
 
@@ -428,26 +462,26 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         bool is_killer = (list.moves[i] == sw.killer_moves[ply][0] || list.moves[i] == sw.killer_moves[ply][1]);
 
         // Late Move Pruning (LMP)
-        if (depth <= 4 && !in_check && is_quiet && !is_killer) {
+        if (!pv_node && depth <= 4 && !in_check && is_quiet && !is_killer) {
             int lmp_threshold = 3 + 2 * depth * depth;
             if (legal_moves > lmp_threshold) continue;
         }
 
         // History Pruning
-        if (depth <= 3 && is_quiet && !is_killer) {
+        if (!pv_node && depth <= 3 && is_quiet && !is_killer) {
             int us = static_cast<int>(pos.sideToMove);
             int hist = sw.history[us][static_cast<int>(move_from(list.moves[i]))][static_cast<int>(move_to(list.moves[i]))];
             if (hist < -4000 * depth) continue;
         }
 
         // PVS SEE Pruning
-        if (depth <= 4 && !in_check && !is_killer && !is_quiet) {
+        if (!pv_node && depth <= 4 && !in_check && !is_killer && !is_quiet) {
             int see_threshold = -200 * depth;
             if (!see_ge(pos, list.moves[i], see_threshold)) continue;
         }
 
         // Futility Pruning
-        if (depth <= 4 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 500) {
+        if (!pv_node && depth <= 8 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 500) {
             int fp_margin = depth * 100 + 100;
             if (static_eval + fp_margin <= alpha) continue;
         }
@@ -464,12 +498,14 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         } else {
             if (depth >= 3 && legal_moves >= 4 && is_quiet && !is_killer) {
                 int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
+                if (pv_node) reduction--;
                 if (!improving) reduction++;
                 
                 int us = static_cast<int>(pos.sideToMove);
                 int hist = sw.history[us][static_cast<int>(move_from(list.moves[i]))][static_cast<int>(move_to(list.moves[i]))];
                 if (hist > 4000) reduction--;
                 
+                reduction = std::max(0, reduction);
                 int reduced_depth = std::max(1, depth - 1 + current_extension - reduction);
                 val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
                 if (val > alpha && reduced_depth < depth - 1 + current_extension) {
@@ -521,7 +557,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                         sw.counter_moves[static_cast<int>(move_from(prev_move))][static_cast<int>(move_to(prev_move))] = list.moves[i];
                     }
                 }
-                Value tt_store_value = beta;
+                Value tt_store_value = best_value;
                 if (tt_store_value >= VALUE_MATE - 500) tt_store_value += ply;
                 else if (tt_store_value <= -VALUE_MATE + 500) tt_store_value -= ply;
                 record_tt(pos.zobristKey, depth, tt_store_value, flag, list.moves[i]);

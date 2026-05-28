@@ -12,7 +12,12 @@ void init_tt(size_t mb_size) {
     }
     if (mb_size < 1) mb_size = 1;
 
-    TT_CLUSTER_COUNT = mb_size * (1 << 20) / sizeof(TTCluster);
+    size_t target_count = mb_size * (1 << 20) / sizeof(TTCluster);
+    TT_CLUSTER_COUNT = 1;
+    while (TT_CLUSTER_COUNT * 2 <= target_count) {
+        TT_CLUSTER_COUNT *= 2;
+    }
+    
     TT = static_cast<TTCluster*>(operator new(TT_CLUSTER_COUNT * sizeof(TTCluster), std::align_val_t(64)));
     clear_tt();
 }
@@ -37,9 +42,30 @@ void record_tt(uint64_t key, int depth, Value score, TTFlag flag, Move best_move
     int replace_idx = 0;
     int min_depth = 999;
     
-    // 1. Exact match or empty slot
+    // 1. Exact match
     for (int i = 0; i < 4; ++i) {
-        if (cluster.entries[i].key == key || cluster.entries[i].key == 0) {
+        if (cluster.entries[i].key == key) {
+            // Preserve best move if the new move is NONE
+            if (best_move == MOVE_NONE) {
+                best_move = cluster.entries[i].best_move;
+            }
+            
+            // Depth protection: don't overwrite a deeper entry with a shallower non-exact entry
+            if (depth < cluster.entries[i].depth && flag != TT_EXACT) {
+                // We still update the best move and age
+                cluster.entries[i].best_move = best_move;
+                cluster.entries[i].age = TT_AGE;
+                return;
+            }
+            
+            replace_idx = i;
+            goto write;
+        }
+    }
+
+    // 1.5 Empty slot
+    for (int i = 0; i < 4; ++i) {
+        if (cluster.entries[i].key == 0) {
             replace_idx = i;
             goto write;
         }

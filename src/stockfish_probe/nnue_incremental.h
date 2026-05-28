@@ -29,7 +29,7 @@ void push_null_state();
 void pop_state(int g_move);
 
 // Get the evaluation of the current position.
-int evaluate();
+int evaluate(bool force_small = false);
 
 // Thread synchronization
 const Position& get_global_pos();

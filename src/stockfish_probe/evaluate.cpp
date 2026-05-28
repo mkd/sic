@@ -154,7 +154,7 @@ int Eval::simple_eval(const Position &pos, Color c) {
          (pos.non_pawn_material(c) - pos.non_pawn_material(~c));
 }
 
-Value Eval::evaluate(const Position &pos) {
+Value Eval::evaluate(const Position &pos, bool force_small) {
   if (pos.state() == nullptr) {
       fprintf(stderr, "CRITICAL ERROR: pos.state() is nullptr in evaluate! pos=%p\n", (const void*)&pos);
       fflush(stderr);
@@ -162,7 +162,7 @@ Value Eval::evaluate(const Position &pos) {
   }
 
   int simpleEval = simple_eval(pos, pos.side_to_move());
-  bool smallNet = std::abs(simpleEval) > 1050;
+  bool smallNet = force_small || (std::abs(simpleEval) > 1050);
 
   int nnueComplexity;
 

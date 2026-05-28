@@ -73,12 +73,12 @@ ifeq ($(ARCH),native)
   CXXFLAGS += -march=native
   # Auto-detect Apple Silicon / ARM64 for NEON optimizations
   ifeq ($(UNAME_M),arm64)
-    CXXFLAGS += -DUSE_NEON
+    CXXFLAGS += -DUSE_NEON=8 -DUSE_NEON_DOTPROD -march=armv8.2-a+dotprod
   else ifeq ($(UNAME_M),aarch64)
-    CXXFLAGS += -DUSE_NEON
+    CXXFLAGS += -DUSE_NEON=8 -DUSE_NEON_DOTPROD -march=armv8.2-a+dotprod
   endif
 else ifeq ($(ARCH),apple-silicon)
-  CXXFLAGS += -mcpu=apple-m1 -DUSE_NEON
+  CXXFLAGS += -mcpu=apple-m1 -DUSE_NEON=8 -DUSE_NEON_DOTPROD
 else ifeq ($(ARCH),x86-64-avx512)
   CXXFLAGS += -march=x86-64-v3 -mavx512f -mavx512bw -mavx512vl -mavx512f16d16
 else ifeq ($(ARCH),x86-64-avx2)
