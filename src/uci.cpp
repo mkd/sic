@@ -153,14 +153,16 @@ static void parse_go(const std::string& args) {
 
         if (movetime_ms > 0) {
             max_depth = 64;
-            TimeManager::allocated_time = movetime_ms;
+            TimeManager::optimum_time = movetime_ms;
+            TimeManager::maximum_time = movetime_ms;
             TimeManager::start_time = TimeManager::get_time_ms();
             TimeManager::stop_search = false;
         } else {
             TimeManager::init_timer(time_left, increment);
         }
     } else {
-        TimeManager::allocated_time = 999999999;
+        TimeManager::optimum_time = 999999999;
+        TimeManager::maximum_time = 999999999;
         TimeManager::start_time = TimeManager::get_time_ms();
         TimeManager::stop_search = false;
     }

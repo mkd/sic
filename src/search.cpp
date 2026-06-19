@@ -458,9 +458,20 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         else if (tt_score <= -VALUE_MATE + 500) tt_score += ply;
 
         // 2. Evaluate bounds strictly
-        if (tt_flag == TT_EXACT) return tt_score;
-        if (tt_flag == TT_ALPHA && tt_score <= alpha) return tt_score;
-        if (tt_flag == TT_BETA && tt_score >= beta) return tt_score;
+        bool cutoff = false;
+        if (tt_flag == TT_EXACT) cutoff = true;
+        else if (tt_flag == TT_ALPHA && tt_score <= alpha) cutoff = true;
+        else if (tt_flag == TT_BETA && tt_score >= beta) cutoff = true;
+
+        if (cutoff) {
+            if (tt_move != MOVE_NONE) {
+                sw.pv_array[ply][ply] = tt_move;
+                sw.pv_length[ply] = ply + 1;
+            } else {
+                sw.pv_length[ply] = ply;
+            }
+            return tt_score;
+        }
     }
 
     // Singular Extension (SE)
@@ -736,8 +747,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 // ---------------------------------------------------------------------------
 Move search_position(Position& pos, int max_depth, int thread_id) {
     Move best_root_move = MOVE_NONE;
-    // Move last_best_move = MOVE_NONE;
-    // int best_move_stability = 0;
+    Move last_best_move = MOVE_NONE;
+    Value last_depth_score = -VALUE_INFINITE;
     SearchWorker& sw = ThreadPool::threads[thread_id]->sw;
     sw.node_count = 0;
     Value prev_score = 0;
@@ -858,15 +869,25 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
                        << " pv" << pv_str << std::endl;
 
             best_root_move = sw.pv_array[0][0];
+
+            if (d >= 5 && thread_id == 0) {
+                if (best_root_move != last_best_move) {
+                    TimeManager::extend_time_for_instability();
+                }
+                if (last_depth_score != -VALUE_INFINITE && best_value < last_depth_score - 50) {
+                    TimeManager::extend_time_for_score_drop();
+                }
+            }
+            last_best_move = best_root_move;
+            last_depth_score = best_value;
             
-            // Time check for normal moves
-            if (!TimeManager::stop_search && TimeManager::allocated_time != 999999999) {
-                if (elapsed >= TimeManager::allocated_time) {
+            // Time check for normal moves (evaluate SOFT limit at root)
+            if (thread_id == 0 && TimeManager::optimum_time != 999999999) {
+                TimeManager::check_time_at_root();
+                if (TimeManager::stop_search) {
                     break;
                 }
             }
-
-            // last_best_move = best_root_move;
         } else {
             best_root_move = sw.pv_array[0][0];
         }

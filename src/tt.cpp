@@ -120,7 +120,7 @@ int get_hashfull() {
     int max_samples = TT_CLUSTER_COUNT < 1000 ? TT_CLUSTER_COUNT : 1000;
     for (int i = 0; i < max_samples; ++i) {
         for (int j = 0; j < 4; ++j) {
-            if (TT[i].entries[j].key != 0) {
+            if (TT[i].entries[j].key != 0 && TT[i].entries[j].age == TT_AGE) {
                 count++;
             }
         }
