@@ -111,6 +111,41 @@ static void sort_moves(const Position& pos, MoveList& list, Move tt_move, const 
 // ---------------------------------------------------------------------------
 //  SEE Helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+//  WDL Normalization
+// ---------------------------------------------------------------------------
+struct WinRateParams {
+    double a;
+    double b;
+};
+
+WinRateParams win_rate_params(const Position& pos) {
+    int material = popcount(pos.pieces(PieceType::PAWN))
+                 + 3 * popcount(pos.pieces(PieceType::KNIGHT))
+                 + 3 * popcount(pos.pieces(PieceType::BISHOP))
+                 + 5 * popcount(pos.pieces(PieceType::ROOK))
+                 + 9 * popcount(pos.pieces(PieceType::QUEEN));
+
+    double m = std::clamp(material, 17, 78) / 58.0;
+
+    constexpr double as[] = {-72.32565836, 185.93832038, -144.58862193, 416.44950446};
+    constexpr double bs[] = {83.86794042, -136.06112997, 69.98820887, 47.62901433};
+
+    double a = (((as[0] * m + as[1]) * m + as[2]) * m) + as[3];
+    double b = (((bs[0] * m + bs[1]) * m + bs[2]) * m) + bs[3];
+
+    return {a, b};
+}
+
+int to_cp(int v, const Position& pos) {
+    auto params = win_rate_params(pos);
+    return static_cast<int>(std::round(100 * v / params.a));
+}
+
+// ---------------------------------------------------------------------------
+//  Mate Value Checks
+// ---------------------------------------------------------------------------
 static Bitboard get_attackers(const Position& pos, Square sq, Bitboard occupied) {
     int sq_idx = static_cast<int>(sq);
     Bitboard attackers = {0};
@@ -128,6 +163,7 @@ static Bitboard get_attackers(const Position& pos, Square sq, Bitboard occupied)
 static bool see_ge(const Position& pos, Move m, int threshold) {
     Square from = move_from(m);
     Square to = move_to(m);
+
     int swap = PieceValues[static_cast<int>(piece_type(pos.piece_on(to)))] - threshold;
     if (swap < 0) return false;
 
@@ -138,6 +174,7 @@ static bool see_ge(const Position& pos, Move m, int threshold) {
 
     Bitboard occupied = pos.occupied();
     occupied.bb ^= (1ULL << static_cast<int>(from));
+    occupied.bb ^= (1ULL << static_cast<int>(to)); // Xoring 'to' is important for pin logic
 
     if (piece_type(pos.piece_on(to)) == PieceType::NONE && attacker_type == PieceType::PAWN) {
         Square ep_sq = pos.sideToMove == Color::WHITE ? static_cast<Square>(static_cast<int>(to) - 8) : static_cast<Square>(static_cast<int>(to) + 8);
@@ -146,36 +183,55 @@ static bool see_ge(const Position& pos, Move m, int threshold) {
     }
 
     Bitboard attackers = get_attackers(pos, to, occupied);
-    Color us = ~pos.sideToMove;
-    Color original_stm = pos.sideToMove;
+    Color stm = pos.sideToMove;
+    int res = 1;
 
     while (true) {
-        Bitboard our_attackers = {attackers.bb & pos.pieces(us).bb};
-        if (our_attackers.bb == 0) break;
+        stm = ~stm;
+        attackers.bb &= occupied.bb;
 
-        PieceType pt = PieceType::NONE;
-        for (int i = 1; i <= 6; ++i) {
-            if (our_attackers.bb & pos.pieces(static_cast<PieceType>(i)).bb) {
-                pt = static_cast<PieceType>(i);
-                break;
-            }
+        Bitboard stmAttackers = {attackers.bb & pos.pieces(stm).bb};
+        if (stmAttackers.bb == 0) break;
+
+        // Don't allow pinned pieces to attack as long as there are pinners
+        if (pos.pinners[static_cast<int>(~stm)].bb & occupied.bb) {
+            stmAttackers.bb &= ~pos.blockersForKing[static_cast<int>(stm)].bb;
+            if (stmAttackers.bb == 0) break;
         }
 
-        Square atk_sq = lsb({our_attackers.bb & pos.pieces(pt).bb});
-        occupied.bb ^= (1ULL << static_cast<int>(atk_sq));
-        attackers.bb &= ~(1ULL << static_cast<int>(atk_sq));
+        res ^= 1;
 
-        if (pt == PieceType::PAWN || pt == PieceType::BISHOP || pt == PieceType::ROOK || pt == PieceType::QUEEN) {
-            attackers.bb |= get_attackers(pos, to, occupied).bb;
+        Bitboard bb;
+        if ((bb.bb = stmAttackers.bb & pos.pieces(PieceType::PAWN).bb)) {
+            if ((swap = PieceValues[static_cast<int>(PieceType::PAWN)] - swap) < res) break;
+            Square lss = lsb(bb);
+            occupied.bb ^= (1ULL << static_cast<int>(lss));
+            attackers.bb |= (get_bishop_attacks(to, occupied).bb & (pos.pieces(PieceType::BISHOP).bb | pos.pieces(PieceType::QUEEN).bb));
+        } else if ((bb.bb = stmAttackers.bb & pos.pieces(PieceType::KNIGHT).bb)) {
+            if ((swap = PieceValues[static_cast<int>(PieceType::KNIGHT)] - swap) < res) break;
+            Square lss = lsb(bb);
+            occupied.bb ^= (1ULL << static_cast<int>(lss));
+        } else if ((bb.bb = stmAttackers.bb & pos.pieces(PieceType::BISHOP).bb)) {
+            if ((swap = PieceValues[static_cast<int>(PieceType::BISHOP)] - swap) < res) break;
+            Square lss = lsb(bb);
+            occupied.bb ^= (1ULL << static_cast<int>(lss));
+            attackers.bb |= (get_bishop_attacks(to, occupied).bb & (pos.pieces(PieceType::BISHOP).bb | pos.pieces(PieceType::QUEEN).bb));
+        } else if ((bb.bb = stmAttackers.bb & pos.pieces(PieceType::ROOK).bb)) {
+            if ((swap = PieceValues[static_cast<int>(PieceType::ROOK)] - swap) < res) break;
+            Square lss = lsb(bb);
+            occupied.bb ^= (1ULL << static_cast<int>(lss));
+            attackers.bb |= (get_rook_attacks(to, occupied).bb & (pos.pieces(PieceType::ROOK).bb | pos.pieces(PieceType::QUEEN).bb));
+        } else if ((bb.bb = stmAttackers.bb & pos.pieces(PieceType::QUEEN).bb)) {
+            if ((swap = PieceValues[static_cast<int>(PieceType::QUEEN)] - swap) < res) break;
+            Square lss = lsb(bb);
+            occupied.bb ^= (1ULL << static_cast<int>(lss));
+            attackers.bb |= (get_bishop_attacks(to, occupied).bb & (pos.pieces(PieceType::BISHOP).bb | pos.pieces(PieceType::QUEEN).bb)) |
+                            (get_rook_attacks(to, occupied).bb & (pos.pieces(PieceType::ROOK).bb | pos.pieces(PieceType::QUEEN).bb));
+        } else { // KING
+            return (attackers.bb & ~pos.pieces(stm).bb) ? res ^ 1 : res;
         }
-
-        swap = PieceValues[static_cast<int>(pt)] - swap;
-        if (swap < 0) {
-            return us != original_stm; // Return true if the player who cannot make the capture is the original defender
-        }
-        us = ~us;
     }
-    return us != original_stm; // If loop breaks due to no attackers, the current player 'us' failed to capture. Return true if 'us' is the defender.
+    return static_cast<bool>(res);
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +284,9 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
     Move tt_move = MOVE_NONE;
     TTFlag tt_flag;
     if (probe_tt(pos.zobristKey, 0, alpha, beta, tt_score, tt_move, tt_flag)) {
-        return tt_score;
+        if (tt_flag == TT_EXACT) return tt_score;
+        if (tt_flag == TT_ALPHA && tt_score <= alpha) return tt_score;
+        if (tt_flag == TT_BETA && tt_score >= beta) return tt_score;
     }
 
     Value stand_pat = -VALUE_INFINITE;
@@ -254,6 +312,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
     Value best_value = stand_pat;
     Move best_move = MOVE_NONE;
     TTFlag flag = TT_ALPHA;
+    int legal_moves = 0;
 
     for (int i = 0; i < list.size(); ++i) {
         if (!in_check && pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
@@ -272,6 +331,8 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
         Position next_pos = pos;
         if (!next_pos.make_move(list.moves[i])) continue;
 
+        legal_moves++;
+
         NnueGuard guard(list.moves[i]);
         Value val = -quiescence(next_pos, -beta, -alpha, ply + 1, sw);
 
@@ -285,8 +346,13 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
         }
         if (alpha >= beta) {
             flag = TT_BETA;
+            best_move = list.moves[i];
             break;
         }
+    }
+
+    if (in_check && legal_moves == 0) {
+        return -(VALUE_MATE - ply);
     }
 
     record_tt(pos.zobristKey, 0, best_value, flag, best_move);
@@ -367,12 +433,10 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (tt_score >= VALUE_MATE - 500) tt_score -= ply;
         else if (tt_score <= -VALUE_MATE + 500) tt_score += ply;
 
-        // 2. Evaluate bounds strictly (Prevent TT Draw Bug by ignoring cutoffs for exactly 0.0)
-        if (tt_score != 0) {
-            if (tt_flag == TT_EXACT) return tt_score;
-            if (tt_flag == TT_ALPHA && tt_score <= alpha) return tt_score;
-            if (tt_flag == TT_BETA && tt_score >= beta) return tt_score;
-        }
+        // 2. Evaluate bounds strictly
+        if (tt_flag == TT_EXACT) return tt_score;
+        if (tt_flag == TT_ALPHA && tt_score <= alpha) return tt_score;
+        if (tt_flag == TT_BETA && tt_score >= beta) return tt_score;
     }
 
     // Singular Extension (SE)
@@ -410,7 +474,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     // Dynamic Null Move Pruning
-    if (!pv_node && !is_null && depth >= 3 && ply > 0 && static_eval >= beta && !in_check) {
+    if (!pv_node && !is_null && depth >= 2 && ply > 0 && static_eval >= beta && !in_check) {
         if ((pos.pieces(pos.sideToMove) & ~(pos.pieces(PieceType::PAWN) | pos.pieces(PieceType::KING))).bb != 0) {
             int r = 3 + depth / 6;
             int nmp_depth = depth - r - 1;
@@ -462,9 +526,9 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         bool is_killer = (list.moves[i] == sw.killer_moves[ply][0] || list.moves[i] == sw.killer_moves[ply][1]);
 
         // Late Move Pruning (LMP)
-        if (!pv_node && depth <= 4 && !in_check && is_quiet && !is_killer) {
-            int lmp_threshold = 3 + 2 * depth * depth;
-            if (legal_moves > lmp_threshold) continue;
+        if (!pv_node && depth <= 3 && !in_check && is_quiet && !is_killer) {
+            int lmp_thresholds[] = {0, 8, 12, 24};
+            if (legal_moves > lmp_thresholds[depth]) continue;
         }
 
         // History Pruning
@@ -482,7 +546,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
         // Futility Pruning
         if (!pv_node && depth <= 8 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 500) {
-            int fp_margin = depth * 100 + 100;
+            int fp_margin = depth * 100;
             if (static_eval + fp_margin <= alpha) continue;
         }
 
@@ -496,9 +560,10 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         if (legal_moves == 1) {
             val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
         } else {
-            if (depth >= 3 && legal_moves >= 4 && is_quiet && !is_killer) {
+            if (depth >= 3 && legal_moves >= 2 && is_quiet) {
                 int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
                 if (pv_node) reduction--;
+                if (is_killer) reduction--;
                 if (!improving) reduction++;
                 
                 int us = static_cast<int>(pos.sideToMove);
@@ -608,10 +673,11 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
 
         Value alpha = -VALUE_MATE_IN_1;
         Value beta = VALUE_MATE_IN_1;
+        int delta = 50;
 
         if (d >= 5) {
-            alpha = std::max(static_cast<Value>(-VALUE_MATE_IN_1), static_cast<Value>(prev_score - 50));
-            beta = std::min(static_cast<Value>(VALUE_MATE_IN_1), static_cast<Value>(prev_score + 50));
+            alpha = std::max(static_cast<Value>(-VALUE_MATE_IN_1), static_cast<Value>(prev_score - delta));
+            beta = std::min(static_cast<Value>(VALUE_MATE_IN_1), static_cast<Value>(prev_score + delta));
         }
 
         Value best_value = -VALUE_INFINITE;
@@ -668,11 +734,13 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
             }
 
             if (best_value <= alpha_orig && alpha_orig != -VALUE_MATE_IN_1) {
-                alpha = -VALUE_MATE_IN_1;
+                alpha = std::max(static_cast<Value>(-VALUE_MATE_IN_1), static_cast<Value>(alpha_orig - delta));
+                delta += delta / 2;
                 continue;
             }
             if (best_value >= beta_orig && beta_orig != VALUE_MATE_IN_1) {
-                beta = VALUE_MATE_IN_1;
+                beta = std::min(static_cast<Value>(VALUE_MATE_IN_1), static_cast<Value>(beta_orig + delta));
+                delta += delta / 2;
                 continue;
             }
 
@@ -704,7 +772,7 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
                 int moves = (plies + 1) / 2;
                 score_str = "score mate " + std::to_string(best_value < 0 ? -moves : moves);
             } else {
-                score_str = "score cp " + std::to_string(best_value);
+                score_str = "score cp " + std::to_string(to_cp(best_value, pos));
             }
 
             std::cout << "info depth " << d
@@ -736,6 +804,7 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
     }
 
     if (thread_id == 0) {
+        TimeManager::stop_search = true;
         std::cout.flush();
     }
 

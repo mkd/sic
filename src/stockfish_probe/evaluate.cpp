@@ -170,6 +170,7 @@ Value Eval::evaluate(const Position &pos, bool force_small) {
                    ? NNUE::evaluate<NNUE::Small>(pos, true, &nnueComplexity)
                    : NNUE::evaluate<NNUE::Big>(pos, true, &nnueComplexity);
 
+
   nnue -= nnue * (nnueComplexity + std::abs(simpleEval - nnue)) / 32768;
 
   int npm = pos.non_pawn_material() / 64;
@@ -183,6 +184,7 @@ Value Eval::evaluate(const Position &pos, bool force_small) {
   v = std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);
 
   v += mop_up(pos, pos.side_to_move());
+
 
   return v;
 }
