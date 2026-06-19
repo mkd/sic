@@ -17,7 +17,7 @@ Sic features a highly aggressive, state-of-the-art search tree designed to heavi
 
 ### Search Algorithm
 * **Principal Variation Search (PVS / NegaScout):** Assumes perfect move ordering to search the first move with a full window and subsequent moves with ultra-fast zero-windows.
-* **Aspiration Windows:** Searches at the root are conducted with a narrow window around the previous iteration's score, rapidly proving fail-highs or fail-lows to prune the tree early.
+* **Progressive Widening Aspiration Windows:** Searches at the root are conducted with a narrow window around the previous iteration's score. If a search fails high or low, Sic utilizes progressive widening to exponentially expand the window and re-search, retaining extraordinarily tight bounds and preventing search tree explosions.
 * **Iterative Deepening:** Progressively deepens the search to ensure the best move is available if time runs out.
 * **Quiescence Search (QS):** Resolves tactical sequences at the end of the main search to avoid the horizon effect. Features **Delta Pruning** to outright prune captures that mathematically cannot raise the score above alpha.
 
@@ -25,20 +25,26 @@ Sic features a highly aggressive, state-of-the-art search tree designed to heavi
 * **TT-Move Prioritization:** Instantly searches the best move found in previous iterations.
 * **MVV-LVA (Most Valuable Victim - Least Valuable Attacker):** Orders captures efficiently.
 * **SEE Capture Ordering:** Uses Static Exchange Evaluation to severely penalize materially losing captures, pushing them to the bottom of the move list to be easily pruned.
+* **Capture History Heuristic:** Dynamically fine-tunes MVV-LVA by tracking the historical success of specific captures (`Attacker -> Victim -> ToSquare`), ensuring the most promising tactical sequences are explored first.
 * **Countermove Heuristic:** Prioritizes the historical best response to the opponent's previous move.
 * **Killer Move Heuristic:** Tracks moves that recently caused beta-cutoffs at the same ply.
-* **History Heuristic (Butterfly Boards):** Dynamically rewards quiet moves that cause cutoffs globally across the search tree, penalizing those that fail.
+* **History Heuristic & Continuation History:** Tracks the global success of quiet moves. Sic employs 1-Ply and 2-Ply Continuation History arrays, tracking move success chronologically against the opponent's immediate previous move and our move from 2 plies ago, mapping deep strategic patterns.
 
 ### Forward Pruning & Reductions
-* **ProbCut:** High-beta searches (`beta + 200`) at deep nodes. If this heavily biased search fails high, we probabilistically assume the full-depth search will fail high, cutting off massive chunks of the tree.
-* **Dynamic Null Move Pruning (NMP):** Passes the turn to the opponent to prove a position is overwhelmingly winning. The depth reduction is scaled dynamically.
+* **ProbCut:** Fast tactical searches (`beta + 200`) at deep nodes. Sic restricts ProbCut generation to only evaluate tactical captures, probabilistically predicting and cutting off massive unpromising branches at extremely low cost.
+* **Dynamic Null Move Pruning (NMP):** Passes the turn to the opponent to prove a position is overwhelmingly winning. The depth reduction is scaled dynamically and kicks in aggressively early in the search tree (`depth >= 2`).
 * **Reverse Futility Pruning (RFP / Static NMP):** Instantly returns static evaluation if the position is far above the beta threshold.
 * **Razoring:** At very low depths, if the static evaluation is significantly below the alpha threshold, immediately drops into Quiescence Search.
-* **Futility Pruning (FP) & Late Move Pruning (LMP):** Skips quiet moves at low depths that cannot mathematically improve the position.
-* **Logarithmic Late Move Reductions (LMR):** Aggressively reduces the search depth of late-ordered moves based on a mathematically principled logarithmic formula.
-* **History Pruning:** Outright prunes quiet moves at low depths if they have a terribly negative historical success rate.
+* **Futility Pruning (FP) & Late Move Pruning (LMP):** Skips quiet moves at low depths that cannot mathematically improve the position. Features extremely tight LMP thresholds matched against modern engine standards.
+* **Dynamic StatScore LMR Scaling:** Aggressively reduces the search depth of late-ordered quiet moves based on a mathematically principled logarithmic formula. Sic aggregates Main History and Continuation History into a unified `StatScore`, dynamically expanding the depth for exceptionally promising moves and instantly pruning historically poor sequences via linear LMR scaling (`reduction -= stat_score / 4000`).
+* **History Pruning:** Outright prunes quiet moves at low depths if they have a terribly negative historical StatScore.
 * **Static Exchange Evaluation (SEE) Pruning:** Simulates captures statically to prune materially losing sequences.
 * **Improving Heuristic:** Dynamically relaxes pruning margins if the position's static evaluation is worsening.
+
+## Evaluation & Scaling
+Sic features a hyper-accurate implementation of Stockfish's NNUE architecture. A critical design decision in Sic is the native preservation of **internal NNUE units** (`~322 = 1 pawn`) throughout the entirety of the search algorithm.
+* **Calibrated Pruning Margins:** Because the static evaluation remains unscaled natively, Sic's internal static pruning margins (e.g., Futility Pruning, Razoring) perfectly align with the magnitude of the evaluation. This unlocks extraordinarily aggressive pruning capabilities, drastically collapsing the size of the search tree.
+* **WDL Score Translation:** Sic translates its raw internal evaluation into standard UCI Centipawns exclusively at the printing stage via a state-of-the-art Win-Draw-Loss (WDL) model. This ensures that the GUI outputs highly accurate `score cp` readouts that reflect the actual win probability based on material and game phase, avoiding the inflated scores seen in engines that naïvely divide by static constants.
 
 ## Compiling and Running
 

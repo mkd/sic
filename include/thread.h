@@ -12,12 +12,22 @@ struct SearchWorker {
     uint64_t node_count;
     Move killer_moves[128][2];
     int history[2][64][64];
+    int capture_history[14][64][14];
+    int continuation_history[2][14][64][14][64];
+    Move played_moves[128];
+    Piece played_pieces[128];
     Value static_evals[128];
     Move counter_moves[64][64];
     uint64_t search_history[128];
 
     SearchWorker() : node_count(0) {
         std::memset(search_history, 0, sizeof(search_history));
+        std::memset(capture_history, 0, sizeof(capture_history));
+        std::memset(continuation_history, 0, sizeof(continuation_history));
+        for (int i = 0; i < 128; ++i) {
+            played_moves[i] = MOVE_NONE;
+            played_pieces[i] = Piece::PIECE_NONE;
+        }
         for (int i = 0; i < 64; ++i) {
             pv_length[i] = 0;
             for (int j = 0; j < 64; ++j) {

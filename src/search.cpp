@@ -56,6 +56,27 @@ void init_lmr() {
 // ---------------------------------------------------------------------------
 static bool see_ge(const Position& pos, Move m, int threshold);
 
+static int get_stat_score(const Position& pos, Move m, const SearchWorker& sw, int ply) {
+    int us = static_cast<int>(pos.sideToMove);
+    int from = static_cast<int>(move_from(m));
+    int to = static_cast<int>(move_to(m));
+    int p = static_cast<int>(pos.piece_on(static_cast<Square>(from)));
+    
+    int score = sw.history[us][from][to];
+
+    if (ply >= 1 && sw.played_moves[ply - 1] != MOVE_NONE) {
+        int prev_p = static_cast<int>(sw.played_pieces[ply - 1]);
+        int prev_to = static_cast<int>(move_to(sw.played_moves[ply - 1]));
+        score += sw.continuation_history[0][prev_p][prev_to][p][to];
+    }
+    if (ply >= 2 && sw.played_moves[ply - 2] != MOVE_NONE) {
+        int prev2_p = static_cast<int>(sw.played_pieces[ply - 2]);
+        int prev2_to = static_cast<int>(move_to(sw.played_moves[ply - 2]));
+        score += sw.continuation_history[1][prev2_p][prev2_to][p][to];
+    }
+    return score;
+}
+
 static int score_move(const Position& pos, Move m, Move tt_move, const SearchWorker& sw, int ply, Move prev_move) {
     if (m == tt_move) return 2000000;
 
@@ -64,9 +85,11 @@ static int score_move(const Position& pos, Move m, Move tt_move, const SearchWor
 
     if (victim != Piece::PIECE_NONE) {
         if (!see_ge(pos, m, 0)) return 100000; // Bad capture
-        int v = static_cast<int>(piece_type(victim));
-        int a = static_cast<int>(piece_type(attacker));
-        return 1000000 + 10 * PieceValues[v] - PieceValues[a];
+        int v = static_cast<int>(victim);
+        int a = static_cast<int>(attacker);
+        int to = static_cast<int>(move_to(m));
+        int cap_hist = sw.capture_history[a][to][v];
+        return 1000000 + 10 * PieceValues[static_cast<int>(piece_type(victim))] - PieceValues[static_cast<int>(piece_type(attacker))] + cap_hist;
     }
 
     if (m == sw.killer_moves[ply][0]) return 900000;
@@ -84,9 +107,10 @@ static int score_move(const Position& pos, Move m, Move tt_move, const SearchWor
         return PieceValues[static_cast<int>(move_prom(m))];
     }
 
-    int hist_score = sw.history[static_cast<int>(pos.sideToMove)][static_cast<int>(move_from(m))][static_cast<int>(move_to(m))];
+    int hist_score = get_stat_score(pos, m, sw, ply);
     return hist_score < 700000 ? hist_score : 700000;
 }
+
 
 static void sort_moves(const Position& pos, MoveList& list, Move tt_move, const SearchWorker& sw, int ply, Move prev_move) {
     int scores[MAX_MOVES];
@@ -458,10 +482,25 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     // ProbCut
     if (!pv_node && !is_null && depth >= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
         Value prob_beta = beta + 200;
-        Value pc_score = negamax(pos, depth - 4, ply, prob_beta - 1, prob_beta, false, sw, prev_move, excluded_move);
-        if (pc_score >= prob_beta) {
-            return prob_beta;
+        MoveList pc_list;
+        MoveGen::generate_legal_moves(pos, pc_list);
+        sort_moves(pos, pc_list, tt_move, sw, ply, prev_move);
+        bool prob_cut = false;
+        for (int i = 0; i < pc_list.size(); ++i) {
+            Move m = pc_list.moves[i];
+            if (pos.piece_on(move_to(m)) == Piece::PIECE_NONE && move_prom(m) == PieceType::NONE) continue;
+            if (!see_ge(pos, m, 1)) continue;
+            
+            Position next_pos = pos;
+            if (!next_pos.make_move(m)) continue;
+            NnueGuard guard(m);
+            Value pc_score = -negamax(next_pos, depth - 4, ply + 1, -prob_beta, -prob_beta + 1, false, sw, m);
+            if (pc_score >= prob_beta) {
+                prob_cut = true;
+                break;
+            }
         }
+        if (prob_cut) return prob_beta;
     }
 
     // Razoring
@@ -520,6 +559,9 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         NnueGuard guard(list.moves[i]);
         legal_moves++;
 
+        sw.played_moves[ply] = list.moves[i];
+        sw.played_pieces[ply] = pos.piece_on(move_from(list.moves[i]));
+
         bool is_quiet = (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
                       && move_prom(list.moves[i]) == PieceType::NONE);
 
@@ -533,8 +575,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
         // History Pruning
         if (!pv_node && depth <= 3 && is_quiet && !is_killer) {
-            int us = static_cast<int>(pos.sideToMove);
-            int hist = sw.history[us][static_cast<int>(move_from(list.moves[i]))][static_cast<int>(move_to(list.moves[i]))];
+            int hist = get_stat_score(pos, list.moves[i], sw, ply);
             if (hist < -4000 * depth) continue;
         }
 
@@ -566,9 +607,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                 if (is_killer) reduction--;
                 if (!improving) reduction++;
                 
-                int us = static_cast<int>(pos.sideToMove);
-                int hist = sw.history[us][static_cast<int>(move_from(list.moves[i]))][static_cast<int>(move_to(list.moves[i]))];
-                if (hist > 4000) reduction--;
+                int hist = get_stat_score(pos, list.moves[i], sw, ply);
+                reduction -= hist / 4000;
                 
                 reduction = std::max(0, reduction);
                 int reduced_depth = std::max(1, depth - 1 + current_extension - reduction);
@@ -609,18 +649,52 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                         sw.killer_moves[ply][0] = list.moves[i];
                     }
                     int bonus = depth * depth;
+                    if (bonus > 400) bonus = 400; // Cap bonus
+                    
                     int us = static_cast<int>(pos.sideToMove);
                     int from = static_cast<int>(move_from(list.moves[i]));
                     int to = static_cast<int>(move_to(list.moves[i]));
+                    int p = static_cast<int>(pos.piece_on(static_cast<Square>(from)));
+                    
                     sw.history[us][from][to] += bonus - sw.history[us][from][to] * abs(bonus) / 16384;
+                    if (ply >= 1 && sw.played_moves[ply - 1] != MOVE_NONE) {
+                        int prev_p = static_cast<int>(sw.played_pieces[ply - 1]);
+                        int prev_to = static_cast<int>(move_to(sw.played_moves[ply - 1]));
+                        sw.continuation_history[0][prev_p][prev_to][p][to] += bonus - sw.continuation_history[0][prev_p][prev_to][p][to] * abs(bonus) / 16384;
+                    }
+                    if (ply >= 2 && sw.played_moves[ply - 2] != MOVE_NONE) {
+                        int prev2_p = static_cast<int>(sw.played_pieces[ply - 2]);
+                        int prev2_to = static_cast<int>(move_to(sw.played_moves[ply - 2]));
+                        sw.continuation_history[1][prev2_p][prev2_to][p][to] += bonus - sw.continuation_history[1][prev2_p][prev2_to][p][to] * abs(bonus) / 16384;
+                    }
+
                     for (int q = 0; q < quiet_count - 1; ++q) {
                         int q_from = static_cast<int>(move_from(quiets_searched[q]));
                         int q_to = static_cast<int>(move_to(quiets_searched[q]));
+                        int q_p = static_cast<int>(pos.piece_on(static_cast<Square>(q_from)));
                         sw.history[us][q_from][q_to] -= bonus + sw.history[us][q_from][q_to] * abs(bonus) / 16384;
+                        
+                        if (ply >= 1 && sw.played_moves[ply - 1] != MOVE_NONE) {
+                            int prev_p = static_cast<int>(sw.played_pieces[ply - 1]);
+                            int prev_to = static_cast<int>(move_to(sw.played_moves[ply - 1]));
+                            sw.continuation_history[0][prev_p][prev_to][q_p][q_to] -= bonus + sw.continuation_history[0][prev_p][prev_to][q_p][q_to] * abs(bonus) / 16384;
+                        }
+                        if (ply >= 2 && sw.played_moves[ply - 2] != MOVE_NONE) {
+                            int prev2_p = static_cast<int>(sw.played_pieces[ply - 2]);
+                            int prev2_to = static_cast<int>(move_to(sw.played_moves[ply - 2]));
+                            sw.continuation_history[1][prev2_p][prev2_to][q_p][q_to] -= bonus + sw.continuation_history[1][prev2_p][prev2_to][q_p][q_to] * abs(bonus) / 16384;
+                        }
                     }
                     if (prev_move != MOVE_NONE) {
                         sw.counter_moves[static_cast<int>(move_from(prev_move))][static_cast<int>(move_to(prev_move))] = list.moves[i];
                     }
+                } else {
+                    int bonus = depth * depth;
+                    if (bonus > 400) bonus = 400; // Cap bonus
+                    int a = static_cast<int>(pos.piece_on(move_from(list.moves[i])));
+                    int to = static_cast<int>(move_to(list.moves[i]));
+                    int v = static_cast<int>(pos.piece_on(static_cast<Square>(to)));
+                    sw.capture_history[a][to][v] += bonus - sw.capture_history[a][to][v] * abs(bonus) / 16384;
                 }
                 Value tt_store_value = best_value;
                 if (tt_store_value >= VALUE_MATE - 500) tt_store_value += ply;
