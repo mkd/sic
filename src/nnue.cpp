@@ -58,7 +58,7 @@
 #if defined(USE_NEON) && !defined(IS_64BIT)
 INLINE int16x8_t vmovl_high_s16(int8x16_t v)
 {
-  return vmovl_s16(vget_high_s16(v));
+  return vmovl_s8(vget_high_s8(v));
 }
 #endif
 
@@ -163,7 +163,7 @@ typedef uint16_t mask_t;
 #define vec_add_16(a,b) vaddq_s16(a,b)
 #define vec_sub_16(a,b) vsubq_s16(a,b)
 #define vec_packs(a,b) vcombine_s8(vqmovn_s16(a),vqmovn_s16(b))
-#define vec_mask_pos(a) neon_movemask(vcgtq_s8(a,vdupq_n_u8(0)))
+#define vec_mask_pos(a) neon_movemask(vcgtq_s8(a,vdupq_n_s8(0)))
 #ifdef IS_64BIT
 #define NUM_REGS 16
 #else
