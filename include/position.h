@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 //  Zobrist Hashing Tables (extern; populated by init_zobrist())
 // ---------------------------------------------------------------------------
-extern uint64_t ZobristPiece[12][64];
+extern uint64_t ZobristPiece[13][64];
 extern uint64_t ZobristCastling[16];
 extern uint64_t ZobristEpFile[8];
 extern uint64_t ZobristSide;

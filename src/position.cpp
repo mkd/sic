@@ -32,7 +32,7 @@
 // ---------------------------------------------------------------------------
 //  Zobrist Hashing Tables
 // ---------------------------------------------------------------------------
-uint64_t ZobristPiece[12][64];
+uint64_t ZobristPiece[13][64];
 uint64_t ZobristCastling[16];
 uint64_t ZobristEpFile[8];
 uint64_t ZobristSide;
@@ -40,7 +40,7 @@ uint64_t ZobristSide;
 void init_zobrist() {
     std::mt19937_64 rng(1337);
 
-    for (int p = 0; p < 12; ++p) {
+    for (int p = 0; p < 13; ++p) {
         for (int sq = 0; sq < 64; ++sq) {
             ZobristPiece[p][sq] = rng();
         }

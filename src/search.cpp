@@ -42,7 +42,7 @@ void init_lmr() {
     for (int d = 0; d < 64; ++d) {
         for (int m = 0; m < 64; ++m) {
             if (d >= 3 && m >= 4) {
-                double reduction = 0.75 + std::log(d) * std::log(m) / 2.25;
+                double reduction = 0.75 + std::log(d) * std::log(m) / 1.95;
                 LMRTable[d][m] = static_cast<int>(reduction);
             } else {
                 LMRTable[d][m] = 0;
@@ -81,6 +81,9 @@ static int score_move(const Position& pos, Move m, Move tt_move, const SearchWor
     if (m == tt_move) return 2000000;
 
     Piece victim = pos.piece_on(move_to(m));
+    if (move_flag(m) == MOVE_FLAG_ENPASSANT) {
+        victim = Piece::WHITE_PAWN; // exact color doesn't matter for piece_type(victim)
+    }
     Piece attacker = pos.piece_on(move_from(m));
 
     if (victim != Piece::PIECE_NONE) {
@@ -387,6 +390,10 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
 //  Negamax Search
 // ---------------------------------------------------------------------------
 static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta, bool is_null, SearchWorker& sw, Move prev_move = MOVE_NONE, Move excluded_move = MOVE_NONE) {
+    if (ply >= 127) {
+        return evaluate(pos, false);
+    }
+
     __builtin_prefetch(&TT[pos.zobristKey & (TT_CLUSTER_COUNT - 1)]);
     sw.pv_length[ply] = ply;
     sw.search_history[ply] = pos.zobristKey;
@@ -451,6 +458,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     Value tt_score = VALUE_ZERO;
     TTFlag tt_flag = TT_EXACT;
     bool singular_extension = false;
+    int double_extension = 0;
 
     if (excluded_move == MOVE_NONE && ply > 0 && probe_tt(pos.zobristKey, depth, alpha, beta, tt_score, tt_move, tt_flag)) {
         // 1. Ply-correct first
@@ -479,7 +487,10 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         int se_depth = (depth - 1) / 2;
         Value se_beta = tt_score - depth * 2;
         Value se_score = -negamax(pos, se_depth, ply, -se_beta - 1, -se_beta, true, sw, MOVE_NONE, tt_move);
-        singular_extension = (se_score < se_beta);
+        if (se_score < se_beta) {
+            singular_extension = true;
+            if (se_score < se_beta - 20) double_extension = 1;
+        }
     }
 
     // Reverse Futility Pruning (Static NMP)
@@ -526,7 +537,9 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     // Dynamic Null Move Pruning
     if (!pv_node && !is_null && depth >= 2 && ply > 0 && static_eval >= beta && !in_check) {
         if ((pos.pieces(pos.sideToMove) & ~(pos.pieces(PieceType::PAWN) | pos.pieces(PieceType::KING))).bb != 0) {
-            int r = 3 + depth / 6;
+            int eval_margin = (static_eval - beta) / 200;
+            if (eval_margin > 3) eval_margin = 3;
+            int r = 3 + depth / 4 + eval_margin;
             int nmp_depth = depth - r - 1;
             if (nmp_depth < 0) nmp_depth = 0;
             
@@ -539,14 +552,12 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     // Internal Iterative Deepening (IID)
-    if (pv_node && depth >= 6 && tt_move == MOVE_NONE && !is_null) {
+    if (depth >= 4 && tt_move == MOVE_NONE && !is_null && !in_check) {
         int iid_depth = depth - 2;
         negamax(pos, iid_depth, ply, alpha, beta, is_null, sw, prev_move, excluded_move);
         Value dummy_score;
         TTFlag dummy_flag;
         probe_tt(pos.zobristKey, 0, alpha, beta, dummy_score, tt_move, dummy_flag);
-    } else if (pv_node && depth >= 3 && tt_move == MOVE_NONE) {
-        depth--;
     }
 
     MoveList list;
@@ -606,7 +617,14 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
             quiets_searched[quiet_count++] = list.moves[i];
         }
 
-        int current_extension = (singular_extension && list.moves[i] == tt_move) ? 1 : 0;
+        int current_extension = 0;
+        if (singular_extension) {
+            if (list.moves[i] == tt_move) {
+                current_extension = 1 + double_extension;
+            } else {
+                current_extension = -1;
+            }
+        }
 
         Value val;
         if (legal_moves == 1) {
@@ -752,6 +770,51 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
     SearchWorker& sw = ThreadPool::threads[thread_id]->sw;
     sw.node_count = 0;
     Value prev_score = 0;
+
+    if (thread_id == 0 && TB_LARGEST > 0) {
+        int pieces = __builtin_popcountll(pos.byColorBB[0].bb) + __builtin_popcountll(pos.byColorBB[1].bb);
+        if (pieces <= (int)TB_LARGEST && pos.castlingRights == 0 && pos.halfmoveClock == 0) {
+            unsigned results[3];
+            unsigned res = tb_probe_root(
+                pos.byColorBB[0].bb, pos.byColorBB[1].bb,
+                pos.byTypeBB[6].bb, pos.byTypeBB[5].bb, pos.byTypeBB[4].bb,
+                pos.byTypeBB[3].bb, pos.byTypeBB[2].bb, pos.byTypeBB[1].bb,
+                pos.halfmoveClock, pos.castlingRights, pos.epSquare == Square::SQ_NONE ? 0 : static_cast<unsigned>(pos.epSquare),
+                pos.sideToMove == Color::WHITE, results
+            );
+
+            if (res != TB_RESULT_FAILED) {
+                Square from = static_cast<Square>(TB_GET_FROM(res));
+                Square to = static_cast<Square>(TB_GET_TO(res));
+                unsigned prom = TB_GET_PROMOTES(res);
+                PieceType prom_piece = PieceType::NONE;
+                if (prom == TB_PROMOTES_QUEEN) prom_piece = PieceType::QUEEN;
+                else if (prom == TB_PROMOTES_ROOK) prom_piece = PieceType::ROOK;
+                else if (prom == TB_PROMOTES_BISHOP) prom_piece = PieceType::BISHOP;
+                else if (prom == TB_PROMOTES_KNIGHT) prom_piece = PieceType::KNIGHT;
+                
+                MoveList list;
+                MoveGen::generate_legal_moves(pos, list);
+                for (int i = 0; i < list.size(); ++i) {
+                    if (move_from(list.moves[i]) == from && move_to(list.moves[i]) == to && move_prom(list.moves[i]) == prom_piece) {
+                        best_root_move = list.moves[i];
+                        break;
+                    }
+                }
+                
+                if (best_root_move != MOVE_NONE) {
+                    unsigned wdl = TB_GET_WDL(res);
+                    Value score = 0;
+                    if (wdl == TB_WIN) score = VALUE_MATE_IN_1 - 1;
+                    else if (wdl == TB_LOSS) score = -VALUE_MATE_IN_1 + 1;
+                    
+                    std::cout << "info depth 1 score cp " << score << " time 0 nodes 0 nps 0 hashfull 0 pv " << move_to_str(best_root_move) << std::endl;
+                    TimeManager::stop_search = true;
+                    return best_root_move;
+                }
+            }
+        }
+    }
 
     for (int d = 1; d <= max_depth; ++d) {
         if (TimeManager::stop_search) break;

@@ -7,8 +7,8 @@
 #include "position.h"
 
 struct SearchWorker {
-    Move pv_array[64][64];
-    int  pv_length[64];
+    Move pv_array[128][128];
+    int  pv_length[128];
     uint64_t node_count;
     Move killer_moves[128][2];
     int history[2][64][64];
@@ -28,9 +28,9 @@ struct SearchWorker {
             played_moves[i] = MOVE_NONE;
             played_pieces[i] = Piece::PIECE_NONE;
         }
-        for (int i = 0; i < 64; ++i) {
+        for (int i = 0; i < 128; ++i) {
             pv_length[i] = 0;
-            for (int j = 0; j < 64; ++j) {
+            for (int j = 0; j < 128; ++j) {
                 pv_array[i][j] = MOVE_NONE;
             }
         }

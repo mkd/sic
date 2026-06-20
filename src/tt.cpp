@@ -118,9 +118,10 @@ bool probe_tt(uint64_t key, int depth, int /*alpha*/, int /*beta*/, Value& retur
 int get_hashfull() {
     int count = 0;
     int max_samples = TT_CLUSTER_COUNT < 1000 ? TT_CLUSTER_COUNT : 1000;
+    int step = TT_CLUSTER_COUNT / max_samples;
     for (int i = 0; i < max_samples; ++i) {
         for (int j = 0; j < 4; ++j) {
-            if (TT[i].entries[j].key != 0 && TT[i].entries[j].age == TT_AGE) {
+            if (TT[i * step].entries[j].key != 0) {
                 count++;
             }
         }

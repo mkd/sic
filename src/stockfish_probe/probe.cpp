@@ -18,11 +18,7 @@ namespace Stockfish {
 
             evalFiles = Eval::NNUE::load_networks("", evalFiles);
 
-            for (auto &[netSize, evalFile]: evalFiles) {
-                std::cout << "Option: " << evalFile.optionName << std::endl; // Print other members similarly
-                std::cout << "Name: " << evalFile.defaultName << std::endl;
-                std::cout << std::endl;
-            }
+
         }
 
         int eval(const char *fen) {
