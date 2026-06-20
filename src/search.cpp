@@ -191,7 +191,9 @@ static bool see_ge(const Position& pos, Move m, int threshold) {
     Square from = move_from(m);
     Square to = move_to(m);
 
-    int swap = PieceValues[static_cast<int>(piece_type(pos.piece_on(to)))] - threshold;
+    PieceType cap_type = piece_type(pos.piece_on(to));
+    if (cap_type == PieceType::NONE && move_flag(m) == MOVE_FLAG_ENPASSANT) cap_type = PieceType::PAWN;
+    int swap = PieceValues[static_cast<int>(cap_type)] - threshold;
     if (swap < 0) return false;
 
     PieceType attacker_type = piece_type(pos.piece_on(from));
@@ -318,7 +320,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
 
     Value stand_pat = -VALUE_INFINITE;
     if (!in_check) {
-        stand_pat = evaluate(pos, false);
+        stand_pat = evaluate(pos, true); // Force Small NNUE for speed in QS
         if (stand_pat >= beta) {
             record_tt(pos.zobristKey, 0, stand_pat, TT_BETA, MOVE_NONE);
             return beta;
@@ -327,7 +329,11 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
     }
 
     MoveList list;
-    MoveGen::generate_legal_moves(pos, list);
+    if (in_check) {
+        MoveGen::generate_legal_moves(pos, list);
+    } else {
+        MoveGen::generate_noisy_moves(pos, list);
+    }
 
     // Terminal-node detection in QS: if in check and no evasions => checkmate
     if (in_check && list.size() == 0) {
@@ -347,7 +353,9 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
 
         // Delta Pruning
         if (!in_check && move_prom(list.moves[i]) == PieceType::NONE) {
-            int captured_val = PieceValues[static_cast<int>(piece_type(pos.piece_on(move_to(list.moves[i]))))];
+            PieceType cap_type = piece_type(pos.piece_on(move_to(list.moves[i])));
+            if (cap_type == PieceType::NONE && move_flag(list.moves[i]) == MOVE_FLAG_ENPASSANT) cap_type = PieceType::PAWN;
+            int captured_val = PieceValues[static_cast<int>(cap_type)];
             if (stand_pat + captured_val + 200 < alpha) {
                 continue;
             }
@@ -362,6 +370,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
 
         NnueGuard guard(list.moves[i]);
         Value val = -quiescence(next_pos, -beta, -alpha, ply + 1, sw);
+        if (TimeManager::stop_search) return 0;
 
         if (val > best_value) {
             best_value = val;
@@ -487,6 +496,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         int se_depth = (depth - 1) / 2;
         Value se_beta = tt_score - depth * 2;
         Value se_score = -negamax(pos, se_depth, ply, -se_beta - 1, -se_beta, true, sw, MOVE_NONE, tt_move);
+        if (TimeManager::stop_search) return 0;
         if (se_score < se_beta) {
             singular_extension = true;
             if (se_score < se_beta - 20) double_extension = 1;
@@ -494,8 +504,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     // Reverse Futility Pruning (Static NMP)
-    if (!pv_node && !is_null && depth <= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
-        int rfp_margin = improving ? depth * 75 : depth * 100;
+    if (!pv_node && !is_null && depth <= 8 && !in_check && abs(beta) < VALUE_MATE - 500) {
+        int rfp_margin = improving ? depth * 75 : depth * 120;
         if (static_eval - rfp_margin >= beta) {
             return static_eval;
         }
@@ -517,6 +527,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
             if (!next_pos.make_move(m)) continue;
             NnueGuard guard(m);
             Value pc_score = -negamax(next_pos, depth - 4, ply + 1, -prob_beta, -prob_beta + 1, false, sw, m);
+            if (TimeManager::stop_search) return 0;
             if (pc_score >= prob_beta) {
                 prob_cut = true;
                 break;
@@ -547,6 +558,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
             null_pos.make_null_move();
             NnueGuard guard(0, true);
             Value null_val = -negamax(null_pos, nmp_depth, ply + 1, -beta, -beta + 1, true, sw, MOVE_NONE);
+            if (TimeManager::stop_search) return 0;
             if (null_val >= beta) return beta;
         }
     }
@@ -596,9 +608,9 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         }
 
         // History Pruning
-        if (!pv_node && depth <= 3 && is_quiet && !is_killer) {
+        if (!pv_node && depth <= 4 && is_quiet && !is_killer) {
             int hist = get_stat_score(pos, list.moves[i], sw, ply);
-            if (hist < -4000 * depth) continue;
+            if (hist < -3000 * depth) continue;
         }
 
         // PVS SEE Pruning
@@ -629,6 +641,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         Value val;
         if (legal_moves == 1) {
             val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
+            if (TimeManager::stop_search) return 0;
         } else {
             if (depth >= 3 && legal_moves >= 2 && is_quiet) {
                 int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
@@ -638,19 +651,24 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                 
                 int hist = get_stat_score(pos, list.moves[i], sw, ply);
                 reduction -= hist / 4000;
+                if (hist < 0) reduction += 1; // Aggressively reduce bad history
                 
                 reduction = std::max(0, reduction);
                 int reduced_depth = std::max(1, depth - 1 + current_extension - reduction);
                 val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
+                if (TimeManager::stop_search) return 0;
                 if (val > alpha && reduced_depth < depth - 1 + current_extension) {
                     val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
+                    if (TimeManager::stop_search) return 0;
                 }
             } else {
                 val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
+                if (TimeManager::stop_search) return 0;
             }
 
             if (val > alpha && val < beta) {
                 val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
+                if (TimeManager::stop_search) return 0;
             }
         }
 
@@ -855,10 +873,13 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
                 Value val;
                 if (legal_moves == 0) {
                     val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw, list.moves[i]);
+                    if (TimeManager::stop_search) break;
                 } else {
                     val = -negamax(next_pos, d - 1, 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
+                    if (TimeManager::stop_search) break;
                     if (val > alpha && val < beta) {
                         val = -negamax(next_pos, d - 1, 1, -beta, -alpha, false, sw, list.moves[i]);
+                        if (TimeManager::stop_search) break;
                     }
                 }
 

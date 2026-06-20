@@ -1,4 +1,5 @@
 #include "../include/tt.h"
+#include "../include/timeman.h"
 #include <cstring>
 #include <new>
 
@@ -32,6 +33,8 @@ void inc_tt_age() {
 }
 
 void record_tt(uint64_t key, int depth, Value score, TTFlag flag, Move best_move) {
+    if (TimeManager::stop_search) return;
+
     TTCluster& cluster = TT[key & (TT_CLUSTER_COUNT - 1)];
     
     if (flag != TT_EXACT) {

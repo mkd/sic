@@ -1,0 +1,180 @@
+import re
+
+with open("src/uci.cpp", "r") as f:
+    content = f.read()
+
+# Define the new uci_execute_line
+new_code = """bool g_flip_board = false;
+
+// Quick MVV LVA for smoves
+static int get_mvv_lva(const Position& pos, Move m) {
+    PieceType attacker = type_of(pos.piece_on(move_from(m)));
+    PieceType victim = type_of(pos.piece_on(move_to(m)));
+    if (move_flag(m) == MOVE_FLAG_ENPASSANT) {
+        victim = PieceType::PAWN;
+    }
+    int score = 0;
+    if (victim != PieceType::NONE) {
+        score = 100 * static_cast<int>(victim) - static_cast<int>(attacker);
+    }
+    if (move_flag(m) == MOVE_FLAG_PROMOTION) {
+        score += 800; // rough queen value
+    }
+    return score;
+}
+
+bool uci_execute_line(const std::string& line) {
+    if (line.empty()) return true;
+
+    std::istringstream iss(line);
+    std::string cmd;
+    iss >> cmd;
+
+    if (cmd == "uci") {
+        std::cout << "id name Sic" << std::endl;
+        std::cout << "id author Claudio M. Camacho <claudiomkd@gmail.com>" << std::endl;
+        std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
+        std::cout << "option name Clear Hash type button" << std::endl;
+        std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
+        std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
+        std::cout << "uciok" << std::endl;
+    } else if (cmd == "isready") {
+        std::cout << "readyok" << std::endl;
+    } else if (cmd == "ucinewgame") {
+        TimeManager::stop_search = false;
+        clear_tt();
+        g_gameHistory.clear();
+        std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
+        std::cout << "option name Clear Hash type button" << std::endl;
+        std::cout << "option name EvalFile type string default nn-62ef826d1a6d.nnue" << std::endl;
+        std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
+    } else if (cmd == "setoption") {
+        std::string rest;
+        std::getline(iss, rest);
+
+        std::string name;
+        std::string value;
+
+        std::istringstream opt_iss(rest);
+        std::string token;
+        bool reading_name = false;
+        bool reading_value = false;
+        while (opt_iss >> token) {
+            if (token == "name") {
+                reading_name = true;
+                reading_value = false;
+                name.clear();
+            } else if (token == "value") {
+                reading_value = true;
+                reading_name = false;
+                value.clear();
+            } else if (reading_name) {
+                if (!name.empty()) name += ' ';
+                name += token;
+            } else if (reading_value) {
+                if (!value.empty()) value += ' ';
+                value += token;
+            }
+        }
+
+        if (name == "EvalFile") {
+            evalFile = value;
+            Stockfish::Probe::init(evalFile.c_str(), "nn-baff1ede1f90.nnue");
+        } else if (name == "Threads") {
+            ThreadPool::set_thread_count(std::stoi(value));
+        } else if (name == "Hash") {
+            init_tt(std::stoi(value));
+        } else if (name == "Clear Hash") {
+            clear_tt();
+        } else if (name == "SyzygyPath") {
+            if (tb_init(value.c_str())) {
+                std::cout << "info string Syzygy tablebases initialized (Up to " << TB_LARGEST << " pieces)" << std::endl;
+            } else {
+                std::cout << "info string Failed to initialize Syzygy tablebases at " << value << std::endl;
+            }
+        }
+    } else if (cmd == "position") {
+        std::string rest;
+        std::getline(iss, rest);
+        parse_position(rest);
+    } else if (cmd == "go") {
+        std::string rest;
+        std::getline(iss, rest);
+        parse_go(rest);
+    } else if (cmd == "help") {
+        std::cout << "Help:\n"
+                  << "- d: display the current position on the board\n"
+                  << "- eval: print the static evaluation for the current position\n"
+                  << "- flip: flip the board when being printed\n"
+                  << "- moves: print the list of pseudo-legal moves, without being sorted\n"
+                  << "- smoves: print the list of pseudo-legal moves, sorted by score\n";
+    } else if (cmd == "flip") {
+        g_flip_board = !g_flip_board;
+        g_pos.print(g_flip_board);
+    } else if (cmd == "d" || cmd == "eval") {
+        g_pos.print(g_flip_board);
+    } else if (cmd == "moves") {
+        MoveList list;
+        MoveGen::generate_legal_moves(g_pos, list);
+        for (int i = 0; i < list.size(); ++i) {
+            std::cout << move_to_str(list.moves[i]) << "\n";
+        }
+    } else if (cmd == "smoves") {
+        MoveList list;
+        MoveGen::generate_legal_moves(g_pos, list);
+        int scores[MAX_MOVES];
+        for (int i = 0; i < list.size(); ++i) {
+            scores[i] = get_mvv_lva(g_pos, list.moves[i]);
+        }
+        for (int i = 1; i < list.size(); ++i) {
+            int key_score = scores[i];
+            Move key_move = list.moves[i];
+            int j = i - 1;
+            while (j >= 0 && scores[j] < key_score) {
+                scores[j + 1] = scores[j];
+                list.moves[j + 1] = list.moves[j];
+                j--;
+            }
+            scores[j + 1] = key_score;
+            list.moves[j + 1] = key_move;
+        }
+        for (int i = 0; i < list.size(); ++i) {
+            std::cout << move_to_str(list.moves[i]) << " (" << scores[i] << ")\n";
+        }
+    } else if (cmd == "stop") {
+        TimeManager::stop_search = true;
+    } else if (cmd == "quit") {
+        TimeManager::stop_search = true;
+        if (search_thread.joinable()) {
+            search_thread.join();
+        }
+        return false;
+    }
+
+    std::cout.flush();
+    return true;
+}
+
+void uci_loop() {"""
+
+content = re.sub(r'void uci_loop\(\) \{', new_code, content, count=1)
+
+# Now we need to replace the while loop inside uci_loop
+old_loop = r'    while \(std::getline\(std::cin, line\)\) \{[\s\S]*?        return;\n    \}\n\n    std::cout\.flush\(\);\n    \}'
+
+new_loop = """    while (std::getline(std::cin, line)) {
+        if (!uci_execute_line(line)) {
+            break;
+        }
+    }"""
+
+# Using string matching from the start of the while loop
+start_idx = content.find('    while (std::getline(std::cin, line)) {')
+end_idx = content.find('    // Clean up if we break out of the loop', start_idx)
+
+if start_idx != -1 and end_idx != -1:
+    content = content[:start_idx] + new_loop + "\n\n" + content[end_idx:]
+
+with open("src/uci.cpp", "w") as f:
+    f.write(content)
+
