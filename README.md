@@ -1,4 +1,4 @@
-# Sic Chess Engine
+# Sic 1.1 Chess Engine
 
 Sic is an ultra-high-performance, UCI-compliant chess engine written in Modern C++20. Designed for speed, cache efficiency, and scalability, Sic leverages a highly optimized custom search architecture paired with a neural network evaluation core.
 

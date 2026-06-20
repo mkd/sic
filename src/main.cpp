@@ -19,7 +19,7 @@ int main(int argc, char* argv[]) {
     uci_init();
 
     // Startup info
-    std::cout << "Sic 1.0 by Claudio M. Camacho <claudiomkd@gmail.com>\n";
+    std::cout << "Sic 1.1 by Claudio M. Camacho <claudiomkd@gmail.com>\n";
     std::cout << "Hash table initialized with " << (4096ull * 1024 * 1024 / sizeof(TTCluster)) * 4 << " entries (4096 MBytes)\n";
     std::cout << "Search thread pool initialized with " << ThreadPool::threads.size() << " threads\n";
     std::cout << std::endl;
