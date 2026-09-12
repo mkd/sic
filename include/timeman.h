@@ -20,6 +20,8 @@ extern uint64_t base_optimum_time;
 extern uint64_t optimum_time;
 extern uint64_t maximum_time;
 extern double time_factor;
-extern bool stop_search;
+#include <atomic>
+
+extern std::atomic<bool> stop_search;
 
 } // namespace TimeManager

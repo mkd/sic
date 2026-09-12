@@ -306,13 +306,18 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
     // Draw detection: 50-move rule and insufficient material
     if (pos.halfmoveClock >= 100) return 0;
     if (pos.is_insufficient_material()) return 0;
+    if (ply >= 127) return evaluate(pos, true);
+    if (ply > 0 && is_repetition(pos, ply, sw)) return 0;
+    
+    sw.search_history[ply] = pos.zobristKey;
 
     bool in_check = pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove);
 
     Value tt_score;
     Move tt_move = MOVE_NONE;
     TTFlag tt_flag;
-    if (probe_tt(pos.zobristKey, 0, alpha, beta, tt_score, tt_move, tt_flag)) {
+    int tt_depth = 0;
+    if (probe_tt(pos.zobristKey, 0, alpha, beta, tt_score, tt_move, tt_flag, tt_depth)) {
         if (tt_flag == TT_EXACT) return tt_score;
         if (tt_flag == TT_ALPHA && tt_score <= alpha) return tt_score;
         if (tt_flag == TT_BETA && tt_score >= beta) return tt_score;
@@ -349,7 +354,7 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
 
     for (int i = 0; i < list.size(); ++i) {
         if (!in_check && pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
-         && move_prom(list.moves[i]) == PieceType::NONE) continue;
+         && move_prom(list.moves[i]) == PieceType::NONE && move_flag(list.moves[i]) != MOVE_FLAG_ENPASSANT) continue;
 
         // Delta Pruning
         if (!in_check && move_prom(list.moves[i]) == PieceType::NONE) {
@@ -466,10 +471,12 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     Move tt_move = MOVE_NONE;
     Value tt_score = VALUE_ZERO;
     TTFlag tt_flag = TT_EXACT;
+    int tt_depth = 0;
     bool singular_extension = false;
     int double_extension = 0;
 
-    if (excluded_move == MOVE_NONE && ply > 0 && probe_tt(pos.zobristKey, depth, alpha, beta, tt_score, tt_move, tt_flag)) {
+    bool tt_hit = probe_tt(pos.zobristKey, depth, alpha, beta, tt_score, tt_move, tt_flag, tt_depth);
+    if (excluded_move == MOVE_NONE && ply > 0 && tt_hit) {
         // 1. Ply-correct first
         if (tt_score >= VALUE_MATE - 500) tt_score -= ply;
         else if (tt_score <= -VALUE_MATE + 500) tt_score += ply;
@@ -492,10 +499,17 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     // Singular Extension (SE)
-    if (depth >= 8 && tt_move != MOVE_NONE && excluded_move == MOVE_NONE && tt_flag != TT_ALPHA && value_abs(tt_score) < VALUE_MATE_IN_2) {
+    // Ensure we have a valid lower bound from a sufficient depth
+    if (depth >= 8 && tt_move != MOVE_NONE && excluded_move == MOVE_NONE 
+        && tt_depth >= depth - 3 && tt_flag != TT_ALPHA && value_abs(tt_score) < VALUE_MATE_IN_2) {
+        
         int se_depth = (depth - 1) / 2;
         Value se_beta = tt_score - depth * 2;
-        Value se_score = -negamax(pos, se_depth, ply, -se_beta - 1, -se_beta, true, sw, MOVE_NONE, tt_move);
+        // Search SAME position but excluded_move=tt_move. 
+        // We do NOT negate the result, because it's still from our perspective!
+        // We use window [se_beta - 1, se_beta]
+        Value se_score = negamax(pos, se_depth, ply, se_beta - 1, se_beta, true, sw, MOVE_NONE, tt_move);
+        
         if (TimeManager::stop_search) return 0;
         if (se_score < se_beta) {
             singular_extension = true;
@@ -513,7 +527,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
     // ProbCut
     if (!pv_node && !is_null && depth >= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
-        Value prob_beta = beta + 200;
+        Value prob_beta = beta + 150;
         MoveList pc_list;
         MoveGen::generate_legal_moves(pos, pc_list);
         sort_moves(pos, pc_list, tt_move, sw, ply, prev_move);
@@ -538,7 +552,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
     // Razoring
     if (!pv_node && !is_null && depth <= 3 && !in_check && abs(beta) < VALUE_MATE - 500) {
-        int razor_margin = depth * 300;
+        int razor_margin = 300 + (depth - 1) * 100;
         if (static_eval + razor_margin <= alpha) {
             Value qval = quiescence(pos, alpha, beta, ply, sw);
             if (qval <= alpha) return qval;
@@ -564,12 +578,13 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     // Internal Iterative Deepening (IID)
-    if (depth >= 4 && tt_move == MOVE_NONE && !is_null && !in_check) {
-        int iid_depth = depth - 2;
+    if (depth >= 6 && tt_move == MOVE_NONE && !is_null && !in_check) {
+        int iid_depth = pv_node ? depth - 2 : depth / 2;
         negamax(pos, iid_depth, ply, alpha, beta, is_null, sw, prev_move, excluded_move);
         Value dummy_score;
         TTFlag dummy_flag;
-        probe_tt(pos.zobristKey, 0, alpha, beta, dummy_score, tt_move, dummy_flag);
+        int dummy_depth = 0;
+        probe_tt(pos.zobristKey, 0, alpha, beta, dummy_score, tt_move, dummy_flag, dummy_depth);
     }
 
     MoveList list;
@@ -583,6 +598,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     int legal_moves = 0;
     Move quiets_searched[MAX_MOVES];
     int quiet_count = 0;
+    Move captures_searched[MAX_MOVES];
+    int capture_count = 0;
 
     for (int i = 0; i < list.size(); ++i) {
         if (list.moves[i] == excluded_move) continue;
@@ -621,12 +638,16 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
         // Futility Pruning
         if (!pv_node && depth <= 8 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 500) {
-            int fp_margin = depth * 100;
+            int hist = get_stat_score(pos, list.moves[i], sw, ply);
+            int fp_margin = depth * 100 + hist / 256;
+            if (fp_margin < 0) fp_margin = 0; // Prevent negative margin from aggressively pruning everything
             if (static_eval + fp_margin <= alpha) continue;
         }
 
         if (is_quiet) {
             quiets_searched[quiet_count++] = list.moves[i];
+        } else {
+            captures_searched[capture_count++] = list.moves[i];
         }
 
         int current_extension = 0;
@@ -650,10 +671,14 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                 if (!improving) reduction++;
                 
                 int hist = get_stat_score(pos, list.moves[i], sw, ply);
-                reduction -= hist / 4000;
-                if (hist < 0) reduction += 1; // Aggressively reduce bad history
                 
-                reduction = std::max(0, reduction);
+                int hist_reduction = hist / 8192;
+                reduction -= hist_reduction;
+                
+                if (hist < -10000) reduction += 1;
+                if (hist > 10000) reduction -= 1;
+                
+                reduction = std::max(0, std::min(reduction, depth - 1));
                 int reduced_depth = std::max(1, depth - 1 + current_extension - reduction);
                 val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
                 if (TimeManager::stop_search) return 0;
@@ -732,6 +757,17 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                             sw.continuation_history[1][prev2_p][prev2_to][q_p][q_to] -= bonus + sw.continuation_history[1][prev2_p][prev2_to][q_p][q_to] * abs(bonus) / 16384;
                         }
                     }
+                    for (int c = 0; c < capture_count; ++c) {
+                        int c_from = static_cast<int>(move_from(captures_searched[c]));
+                        int c_to = static_cast<int>(move_to(captures_searched[c]));
+                        int c_a = static_cast<int>(pos.piece_on(static_cast<Square>(c_from)));
+                        int c_v = static_cast<int>(pos.piece_on(static_cast<Square>(c_to)));
+                        if (c_v == static_cast<int>(Piece::PIECE_NONE) && move_flag(captures_searched[c]) == MOVE_FLAG_ENPASSANT) {
+                            c_v = static_cast<int>(pos.sideToMove == Color::WHITE ? Piece::BLACK_PAWN : Piece::WHITE_PAWN);
+                        }
+                        sw.capture_history[c_a][c_to][c_v] -= bonus + sw.capture_history[c_a][c_to][c_v] * abs(bonus) / 16384;
+                    }
+
                     if (prev_move != MOVE_NONE) {
                         sw.counter_moves[static_cast<int>(move_from(prev_move))][static_cast<int>(move_to(prev_move))] = list.moves[i];
                     }
@@ -741,7 +777,21 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                     int a = static_cast<int>(pos.piece_on(move_from(list.moves[i])));
                     int to = static_cast<int>(move_to(list.moves[i]));
                     int v = static_cast<int>(pos.piece_on(static_cast<Square>(to)));
+                    if (v == static_cast<int>(Piece::PIECE_NONE) && move_flag(list.moves[i]) == MOVE_FLAG_ENPASSANT) {
+                        v = static_cast<int>(pos.sideToMove == Color::WHITE ? Piece::BLACK_PAWN : Piece::WHITE_PAWN);
+                    }
                     sw.capture_history[a][to][v] += bonus - sw.capture_history[a][to][v] * abs(bonus) / 16384;
+                    
+                    for (int c = 0; c < capture_count - 1; ++c) {
+                        int c_from = static_cast<int>(move_from(captures_searched[c]));
+                        int c_to = static_cast<int>(move_to(captures_searched[c]));
+                        int c_a = static_cast<int>(pos.piece_on(static_cast<Square>(c_from)));
+                        int c_v = static_cast<int>(pos.piece_on(static_cast<Square>(c_to)));
+                        if (c_v == static_cast<int>(Piece::PIECE_NONE) && move_flag(captures_searched[c]) == MOVE_FLAG_ENPASSANT) {
+                            c_v = static_cast<int>(pos.sideToMove == Color::WHITE ? Piece::BLACK_PAWN : Piece::WHITE_PAWN);
+                        }
+                        sw.capture_history[c_a][c_to][c_v] -= bonus + sw.capture_history[c_a][c_to][c_v] * abs(bonus) / 16384;
+                    }
                 }
                 Value tt_store_value = best_value;
                 if (tt_store_value >= VALUE_MATE - 500) tt_store_value += ply;
@@ -792,7 +842,7 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
     if (thread_id == 0 && TB_LARGEST > 0) {
         int pieces = __builtin_popcountll(pos.byColorBB[0].bb) + __builtin_popcountll(pos.byColorBB[1].bb);
         if (pieces <= (int)TB_LARGEST && pos.castlingRights == 0 && pos.halfmoveClock == 0) {
-            unsigned results[3];
+            unsigned results[TB_MAX_MOVES];
             unsigned res = tb_probe_root(
                 pos.byColorBB[0].bb, pos.byColorBB[1].bb,
                 pos.byTypeBB[6].bb, pos.byTypeBB[5].bb, pos.byTypeBB[4].bb,

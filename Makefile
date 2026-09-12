@@ -77,16 +77,19 @@ ifeq ($(ARCH),native)
   else ifeq ($(UNAME_M),aarch64)
     CXXFLAGS += -DUSE_NEON=8 -DUSE_NEON_DOTPROD -march=armv8.2-a+dotprod
   endif
+  ifneq ($(filter %86 x86_64,$(UNAME_M)),)
+    CXXFLAGS += -DUSE_AVX2
+  endif
 else ifeq ($(ARCH),apple-silicon)
   CXXFLAGS += -mcpu=apple-m1 -DUSE_NEON=8 -DUSE_NEON_DOTPROD
 else ifeq ($(ARCH),x86-64-avx512)
-  CXXFLAGS += -march=x86-64-v3 -mavx512f -mavx512bw -mavx512vl -mavx512f16d16
+  CXXFLAGS += -march=x86-64-v3 -mavx512f -mavx512bw -mavx512vl -mavx512f16d16 -DUSE_AVX512
 else ifeq ($(ARCH),x86-64-avx2)
-  CXXFLAGS += -march=x86-64-v2 -mavx2 -mbmi -mbmi2 -mpopcnt -mpclmul
+  CXXFLAGS += -march=x86-64-v2 -mavx2 -mbmi -mbmi2 -mpopcnt -mpclmul -DUSE_AVX2
 else ifeq ($(ARCH),x86-64-bmi2)
-  CXXFLAGS += -mbmi2 -mbmi -mpopcnt -mpclmul
+  CXXFLAGS += -mbmi2 -mbmi -mpopcnt -mpclmul -DUSE_SSE2
 else
-  CXXFLAGS += -march=x86-64
+  CXXFLAGS += -march=x86-64 -DUSE_SSE2
 endif
 
 # ============================================================================

@@ -8,7 +8,7 @@ uint64_t base_optimum_time = 0;
 uint64_t optimum_time   = 0;
 uint64_t maximum_time   = 0;
 double time_factor      = 1.0;
-bool stop_search        = false;
+std::atomic<bool> stop_search{false};
 
 uint64_t get_time_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(

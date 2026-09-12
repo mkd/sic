@@ -81,7 +81,7 @@ NNUE::EvalFiles NNUE::load_networks(const std::string &rootDirectory,
         }
 
         if (directory == "<internal>" &&
-            user_eval_file == evalFile.defaultName) {
+            user_eval_file == (netSize == Small ? EvalFileDefaultNameSmall : EvalFileDefaultNameBig)) {
           // C++ way to prepare a buffer for a memory stream
           class MemoryBuffer : public std::basic_streambuf<char> {
           public:

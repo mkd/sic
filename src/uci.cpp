@@ -34,7 +34,7 @@ std::vector<uint64_t> g_gameHistory;
 // ---------------------------------------------------------------------------
 //  NNUE Network File Path (single HalfKP)
 // ---------------------------------------------------------------------------
-static std::string evalFile = "nn-62ef826d1a6d.nnue";
+static std::string evalFile = "nn-b1a57edbea57.nnue";
 
 // ---------------------------------------------------------------------------
 //  Parse "position ..." command
@@ -155,6 +155,7 @@ static void parse_go(const std::string& args) {
             max_depth = 64;
             TimeManager::maximum_time = std::max(0, movetime_ms - 50);
             TimeManager::optimum_time = TimeManager::maximum_time;
+            TimeManager::base_optimum_time = TimeManager::optimum_time;
             TimeManager::start_time = TimeManager::get_time_ms();
             TimeManager::stop_search = false;
         } else {
@@ -225,7 +226,7 @@ bool uci_execute_line(const std::string& line) {
         std::cout << "option name Threads type spin default 9 min 1 max 128" << std::endl;
         std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
         std::cout << "option name Clear Hash type button" << std::endl;
-        std::cout << "option name EvalFile type string default nn-71d6d32cb962.nnue" << std::endl;
+        std::cout << "option name EvalFile type string default nn-b1a57edbea57.nnue" << std::endl;
         std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
         std::cout << "uciok" << std::endl;
     } else if (cmd == "isready") {
@@ -265,7 +266,7 @@ bool uci_execute_line(const std::string& line) {
 
         if (name == "EvalFile") {
             evalFile = value;
-            Stockfish::Probe::init(evalFile.c_str(), "nn-71d6d32cb962.nnue");
+            Stockfish::Probe::init(evalFile.c_str(), "nn-baff1ede1f90.nnue");
         } else if (name == "Threads") {
             ThreadPool::set_thread_count(std::stoi(value));
         } else if (name == "Hash") {
@@ -313,7 +314,7 @@ bool uci_execute_line(const std::string& line) {
         }
     } else if (cmd == "keys") {
         std::cout << "Game history keys:\n";
-        for (int i = 0; i < g_gameHistory.size(); ++i) {
+        for (size_t i = 0; i < g_gameHistory.size(); ++i) {
             std::cout << "Ply " << i << ": " << g_gameHistory[i] << "\n";
         }
         std::cout << "Current pos key: " << g_pos.zobristKey << "\n";
@@ -354,7 +355,7 @@ bool uci_execute_line(const std::string& line) {
 }
 
 void uci_init() {
-    Stockfish::Probe::init("nn-71d6d32cb962.nnue", "nn-71d6d32cb962.nnue");
+    Stockfish::Probe::init("nn-b1a57edbea57.nnue", "nn-baff1ede1f90.nnue");
     Stockfish::Incremental::init();
 
     g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");

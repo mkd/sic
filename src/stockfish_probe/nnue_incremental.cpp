@@ -281,6 +281,10 @@ void do_null_move(StateInfo *new_si) {
   // 2. Clear DirtyPiece (No pieces moved)
   new_si->dirtyPiece.dirty_num = 0;
 
+  // Copy nonPawnMaterial
+  new_si->nonPawnMaterial[WHITE] = new_si->previous->nonPawnMaterial[WHITE];
+  new_si->nonPawnMaterial[BLACK] = new_si->previous->nonPawnMaterial[BLACK];
+
   // 3. Update side to move
   global_pos.sideToMove = ~global_pos.sideToMove;
 

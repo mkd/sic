@@ -2,6 +2,7 @@
 
 #include "../include/types.h"
 #include <cstddef>
+#include <atomic>
 
 enum TTFlag : uint8_t {
     TT_EXACT = 0,
@@ -10,7 +11,7 @@ enum TTFlag : uint8_t {
 };
 
 struct alignas(16) TTEntry {
-    uint64_t key;
+    std::atomic<uint64_t> key;
     Move     best_move;
     Value    score;
     int8_t   depth;
@@ -32,5 +33,5 @@ void inc_tt_age();
 void init_tt(size_t mb_size);
 void clear_tt();
 void record_tt(uint64_t key, int depth, Value score, TTFlag flag, Move best_move);
-bool probe_tt(uint64_t key, int depth, int alpha, int beta, Value& return_score, Move& tt_move, TTFlag& return_flag);
+bool probe_tt(uint64_t key, int depth, int alpha, int beta, Value& return_score, Move& tt_move, TTFlag& return_flag, int& tt_depth);
 int get_hashfull();
