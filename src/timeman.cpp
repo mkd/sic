@@ -20,12 +20,12 @@ void init_timer(int time_left_ms, int increment_ms) {
     // 1. Calculate a safe maximum time (leave 50ms for network/GUI overhead)
     uint64_t safe_max = std::max(0, time_left_ms - 50);
 
-    // 2. Soft Time: Target time we want to spend (usually time_left / 40)
-    base_optimum_time = (time_left_ms / 40) + (increment_ms * 3 / 4);
+    // 2. Soft Time: Target time we want to spend (usually time_left / 25)
+    base_optimum_time = (time_left_ms / 25) + (increment_ms * 3 / 4);
     optimum_time = base_optimum_time;
     
-    // 3. Hard Time: Absolute maximum we can spend (approx time_left / 5 + increment)
-    maximum_time = std::min(static_cast<uint64_t>(safe_max), static_cast<uint64_t>(time_left_ms / 5) + increment_ms);
+    // 3. Hard Time: Absolute maximum we can spend (approx time_left / 4 + increment)
+    maximum_time = std::min(static_cast<uint64_t>(safe_max), static_cast<uint64_t>(time_left_ms / 4) + increment_ms);
     
     // Fallback: Ensure maximum_time doesn't exceed safe_max
     if (maximum_time > safe_max) {
@@ -60,17 +60,25 @@ void check_time_at_root() {
 }
 
 void extend_time_for_instability() {
-    // Best move changed! Extend the soft limit
+    // Best move changed! Extend the soft limit (up to 3.0x)
     time_factor += 0.3;
-    if (time_factor > 2.0) time_factor = 2.0;
+    if (time_factor > 3.0) time_factor = 3.0;
     optimum_time = std::min(maximum_time, static_cast<uint64_t>(base_optimum_time * time_factor));
 }
 
 void extend_time_for_score_drop() {
-    // Score dropped significantly. Extend time
-    time_factor += 0.3;
-    if (time_factor > 2.0) time_factor = 2.0;
+    // Score dropped significantly. Extend time (up to 4.0x)
+    time_factor += 0.5;
+    if (time_factor > 4.0) time_factor = 4.0;
     optimum_time = std::min(maximum_time, static_cast<uint64_t>(base_optimum_time * time_factor));
+}
+
+void scale_time_for_nodes(uint64_t best_move_nodes, uint64_t total_nodes) {
+    if (total_nodes < 10000 || base_optimum_time == 999999999) return;
+    double fraction = static_cast<double>(best_move_nodes) / static_cast<double>(total_nodes);
+    // Multiply by up to 2.5x if the best move has very few nodes (low confidence)
+    double multiplier = std::max(0.6, 2.5 - 2.0 * fraction);
+    optimum_time = std::min(maximum_time, static_cast<uint64_t>(base_optimum_time * time_factor * multiplier));
 }
 
 } // namespace TimeManager

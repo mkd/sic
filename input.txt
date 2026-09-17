@@ -1,0 +1,4 @@
+setoption name Threads value 1
+position startpos
+go depth 12
+sleep 10000

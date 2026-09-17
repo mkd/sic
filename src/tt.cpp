@@ -36,81 +36,89 @@ void record_tt(uint64_t key, int depth, Value score, TTFlag flag, Move best_move
     if (TimeManager::stop_search) return;
 
     TTCluster& cluster = TT[key & (TT_CLUSTER_COUNT - 1)];
+    uint16_t key16 = static_cast<uint16_t>(key >> 48);
     
-    if (flag != TT_EXACT) {
-        if (score > VALUE_MATE_IN_1) score = VALUE_MATE_IN_1;
-        else if (score < -VALUE_MATE_IN_1) score = -VALUE_MATE_IN_1;
-    }
+    // Clamp to int16_t range (TT stores scores as int16_t)
+    if (score > 32000) score = 32000;
+    else if (score < -32000) score = -32000;
 
     int replace_idx = 0;
     int min_depth = 999;
     
+    uint16_t e_key16; Move e_move; Value e_score; int8_t e_depth; TTFlag e_flag; uint8_t e_age;
+
     // 1. Exact match
-    for (int i = 0; i < 4; ++i) {
-        if (cluster.entries[i].key == key) {
-            // Preserve best move if the new move is NONE
+    for (int i = 0; i < 8; ++i) {
+        uint64_t d = cluster.entries[i].data.load(std::memory_order_relaxed);
+        unpack_tt(d, e_key16, e_move, e_score, e_depth, e_flag, e_age);
+        
+        if (d != 0 && e_key16 == key16) {
             if (best_move == MOVE_NONE) {
-                best_move = cluster.entries[i].best_move;
+                best_move = e_move;
             }
-            
-            // Depth protection: don't overwrite a deeper entry with a shallower non-exact entry
-            if (depth < cluster.entries[i].depth && flag != TT_EXACT) {
-                // We still update the best move and age
-                cluster.entries[i].best_move = best_move;
-                cluster.entries[i].age = TT_AGE;
+            if (depth < e_depth && flag != TT_EXACT) {
+                cluster.entries[i].data.store(pack_tt(key16, best_move, e_score, e_depth, e_flag, TT_AGE), std::memory_order_relaxed);
                 return;
             }
-            
             replace_idx = i;
             goto write;
         }
     }
 
     // 1.5 Empty slot
-    for (int i = 0; i < 4; ++i) {
-        if (cluster.entries[i].key == 0) {
+    for (int i = 0; i < 8; ++i) {
+        if (cluster.entries[i].data.load(std::memory_order_relaxed) == 0) {
             replace_idx = i;
             goto write;
         }
     }
     
     // 2. Older generation
-    for (int i = 0; i < 4; ++i) {
-        if (cluster.entries[i].age != TT_AGE) {
+    for (int i = 0; i < 8; ++i) {
+        uint64_t d = cluster.entries[i].data.load(std::memory_order_relaxed);
+        unpack_tt(d, e_key16, e_move, e_score, e_depth, e_flag, e_age);
+        if (e_age != TT_AGE) {
             replace_idx = i;
             goto write;
         }
     }
     
     // 3. Lowest depth
-    for (int i = 0; i < 4; ++i) {
-        if (cluster.entries[i].depth < min_depth) {
-            min_depth = cluster.entries[i].depth;
+    for (int i = 0; i < 8; ++i) {
+        uint64_t d = cluster.entries[i].data.load(std::memory_order_relaxed);
+        unpack_tt(d, e_key16, e_move, e_score, e_depth, e_flag, e_age);
+        if (e_depth < min_depth) {
+            min_depth = e_depth;
             replace_idx = i;
         }
     }
 
 write:
-    cluster.entries[replace_idx].key = key;
-    cluster.entries[replace_idx].best_move = best_move;
-    cluster.entries[replace_idx].score = score;
-    cluster.entries[replace_idx].depth = static_cast<int8_t>(depth);
-    cluster.entries[replace_idx].flag = flag;
-    cluster.entries[replace_idx].age = TT_AGE;
+    cluster.entries[replace_idx].data.store(pack_tt(key16, best_move, score, static_cast<int8_t>(depth), flag, TT_AGE), std::memory_order_relaxed);
 }
 
 bool probe_tt(uint64_t key, int depth, int /*alpha*/, int /*beta*/, Value& return_score, Move& tt_move, TTFlag& return_flag, int& tt_depth) {
     TTCluster& cluster = TT[key & (TT_CLUSTER_COUNT - 1)];
+    uint16_t key16 = static_cast<uint16_t>(key >> 48);
 
-    for (int i = 0; i < 4; ++i) {
-        if (cluster.entries[i].key == key) {
-            cluster.entries[i].age = TT_AGE; // Refresh age
-            tt_move = cluster.entries[i].best_move;
-            return_score = cluster.entries[i].score;
-            return_flag = cluster.entries[i].flag;
-            tt_depth = cluster.entries[i].depth;
+    uint16_t e_key16; Move e_move; Value e_score; int8_t e_depth; TTFlag e_flag; uint8_t e_age;
 
-            if (cluster.entries[i].depth >= depth) {
+    for (int i = 0; i < 8; ++i) {
+        uint64_t d = cluster.entries[i].data.load(std::memory_order_relaxed);
+        if (d == 0) continue;
+        
+        unpack_tt(d, e_key16, e_move, e_score, e_depth, e_flag, e_age);
+        
+        if (e_key16 == key16) {
+            if (e_age != TT_AGE) {
+                cluster.entries[i].data.store(pack_tt(e_key16, e_move, e_score, e_depth, e_flag, TT_AGE), std::memory_order_relaxed);
+            }
+            tt_move = e_move;
+            return_score = e_score;
+            return_flag = e_flag;
+            tt_depth = e_depth;
+
+            if (e_depth >= depth) {
                 return true;
             }
             return false;
@@ -124,11 +132,11 @@ int get_hashfull() {
     int max_samples = TT_CLUSTER_COUNT < 1000 ? TT_CLUSTER_COUNT : 1000;
     int step = TT_CLUSTER_COUNT / max_samples;
     for (int i = 0; i < max_samples; ++i) {
-        for (int j = 0; j < 4; ++j) {
-            if (TT[i * step].entries[j].key != 0) {
+        for (int j = 0; j < 8; ++j) {
+            if (TT[i * step].entries[j].data.load(std::memory_order_relaxed) != 0) {
                 count++;
             }
         }
     }
-    return (count * 1000) / (max_samples * 4);
+    return (count * 1000) / (max_samples * 8);
 }

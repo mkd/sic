@@ -1,3 +1,4 @@
-run < cmds.txt
+process launch -i input.txt
 bt
-quit
+frame select 0
+p pos

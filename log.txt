@@ -1,0 +1,5 @@
+Sic 1.1 by Claudio M. Camacho <claudiomkd@gmail.com>
+Hash table initialized with 268435456 entries (4096 MBytes)
+Search thread pool initialized with 9 threads
+
+bestmove a1a1

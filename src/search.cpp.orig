@@ -41,8 +41,8 @@ int LMRTable[64][64];
 void init_lmr() {
     for (int d = 0; d < 64; ++d) {
         for (int m = 0; m < 64; ++m) {
-            if (d >= 2 && m >= 2) {
-                double reduction = 0.75 + std::log(d) * std::log(m) / 2.25;
+            if (d >= 3 && m >= 4) {
+                double reduction = 0.75 + std::log(d) * std::log(m) / 1.95;
                 LMRTable[d][m] = static_cast<int>(reduction);
             } else {
                 LMRTable[d][m] = 0;
@@ -73,16 +73,6 @@ static int get_stat_score(const Position& pos, Move m, const SearchWorker& sw, i
         int prev2_p = static_cast<int>(sw.played_pieces[ply - 2]);
         int prev2_to = static_cast<int>(move_to(sw.played_moves[ply - 2]));
         score += sw.continuation_history[1][prev2_p][prev2_to][p][to];
-    }
-    if (ply >= 4 && sw.played_moves[ply - 4] != MOVE_NONE) {
-        int prev4_p = static_cast<int>(sw.played_pieces[ply - 4]);
-        int prev4_to = static_cast<int>(move_to(sw.played_moves[ply - 4]));
-        score += sw.continuation_history[2][prev4_p][prev4_to][p][to];
-    }
-    if (ply >= 6 && sw.played_moves[ply - 6] != MOVE_NONE) {
-        int prev6_p = static_cast<int>(sw.played_pieces[ply - 6]);
-        int prev6_to = static_cast<int>(move_to(sw.played_moves[ply - 6]));
-        score += sw.continuation_history[3][prev6_p][prev6_to][p][to];
     }
     return score;
 }
@@ -123,55 +113,6 @@ static int score_move(const Position& pos, Move m, Move tt_move, const SearchWor
     int hist_score = get_stat_score(pos, m, sw, ply);
     return hist_score < 700000 ? hist_score : 700000;
 }
-
-class MovePicker {
-    const Position& pos;
-    const SearchWorker& sw;
-    int ply;
-    Move prev_move;
-    Move tt_move;
-    
-    MoveList list;
-    int scores[MAX_MOVES];
-    int current_idx;
-    
-public:
-    MovePicker(const Position& p, const SearchWorker& s, int pl, Move prev, Move tt, bool qsearch = false)
-      : pos(p), sw(s), ply(pl), prev_move(prev), tt_move(tt), current_idx(0) {
-        if (qsearch && !pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove)) {
-            MoveGen::generate_noisy_moves(pos, list);
-        } else {
-            MoveGen::generate_legal_moves(pos, list);
-        }
-        for (int i = 0; i < list.size(); ++i) scores[i] = -2000000;
-    }
-    
-    Move next() {
-        if (current_idx >= list.size()) return MOVE_NONE;
-        
-        int best_score = -3000000;
-        int best_idx = current_idx;
-        
-        for (int i = current_idx; i < list.size(); ++i) {
-            if (scores[i] == -2000000) {
-                scores[i] = score_move(pos, list.moves[i], tt_move, sw, ply, prev_move);
-            }
-            if (scores[i] > best_score) {
-                best_score = scores[i];
-                best_idx = i;
-            }
-        }
-        
-        Move best_move = list.moves[best_idx];
-        list.moves[best_idx] = list.moves[current_idx];
-        scores[best_idx] = scores[current_idx];
-        
-        current_idx++;
-        return best_move;
-    }
-    
-    int size() const { return list.size(); }
-};
 
 
 static void sort_moves(const Position& pos, MoveList& list, Move tt_move, const SearchWorker& sw, int ply, Move prev_move) {
@@ -377,10 +318,6 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
     TTFlag tt_flag;
     int tt_depth = 0;
     if (probe_tt(pos.zobristKey, 0, alpha, beta, tt_score, tt_move, tt_flag, tt_depth)) {
-        // Ply-adjust mate scores from TT
-        if (tt_score >= VALUE_MATE - 500) tt_score -= ply;
-        else if (tt_score <= -VALUE_MATE + 500) tt_score += ply;
-
         if (tt_flag == TT_EXACT) return tt_score;
         if (tt_flag == TT_ALPHA && tt_score <= alpha) return tt_score;
         if (tt_flag == TT_BETA && tt_score >= beta) return tt_score;
@@ -396,53 +333,53 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
         if (stand_pat > alpha) alpha = stand_pat;
     }
 
-    MovePicker picker(pos, sw, ply, MOVE_NONE, tt_move, true);
+    MoveList list;
+    if (in_check) {
+        MoveGen::generate_legal_moves(pos, list);
+    } else {
+        MoveGen::generate_noisy_moves(pos, list);
+    }
 
     // Terminal-node detection in QS: if in check and no evasions => checkmate
-    if (in_check && picker.size() == 0) {
+    if (in_check && list.size() == 0) {
         return -(VALUE_MATE - ply);
     }
+
+    sort_moves(pos, list, tt_move, sw, 0, MOVE_NONE);
 
     Value best_value = stand_pat;
     Move best_move = MOVE_NONE;
     TTFlag flag = TT_ALPHA;
     int legal_moves = 0;
-    Move move;
 
-    bool pruned_evasions = false;
-    while ((move = picker.next()) != MOVE_NONE) {
-        if (!in_check && pos.piece_on(move_to(move)) == Piece::PIECE_NONE
-         && move_prom(move) == PieceType::NONE && move_flag(move) != MOVE_FLAG_ENPASSANT) continue;
+    for (int i = 0; i < list.size(); ++i) {
+        if (!in_check && pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
+         && move_prom(list.moves[i]) == PieceType::NONE && move_flag(list.moves[i]) != MOVE_FLAG_ENPASSANT) continue;
 
         // Delta Pruning
-        if (!in_check && move_prom(move) == PieceType::NONE) {
-            PieceType cap_type = piece_type(pos.piece_on(move_to(move)));
-            if (cap_type == PieceType::NONE && move_flag(move) == MOVE_FLAG_ENPASSANT) cap_type = PieceType::PAWN;
+        if (!in_check && move_prom(list.moves[i]) == PieceType::NONE) {
+            PieceType cap_type = piece_type(pos.piece_on(move_to(list.moves[i])));
+            if (cap_type == PieceType::NONE && move_flag(list.moves[i]) == MOVE_FLAG_ENPASSANT) cap_type = PieceType::PAWN;
             int captured_val = PieceValues[static_cast<int>(cap_type)];
-            // Margin is 200 centipawns, which is ~656 internal units (200 * 3.28)
-            if (stand_pat + captured_val + 656 < alpha) {
+            if (stand_pat + captured_val + 200 < alpha) {
                 continue;
             }
         }
 
-        // Prune bad captures and bad evasions
-        if (!see_ge(pos, move, 0)) {
-            pruned_evasions = true;
-            continue;
-        }
+        if (!in_check && !see_ge(pos, list.moves[i], 0)) continue;
 
         Position next_pos = pos;
-        if (!next_pos.make_move(move)) continue;
+        if (!next_pos.make_move(list.moves[i])) continue;
 
         legal_moves++;
 
-        NnueGuard guard(move);
+        NnueGuard guard(list.moves[i]);
         Value val = -quiescence(next_pos, -beta, -alpha, ply + 1, sw);
         if (TimeManager::stop_search) return 0;
 
         if (val > best_value) {
             best_value = val;
-            best_move = move;
+            best_move = list.moves[i];
         }
         if (val > alpha) {
             alpha = val;
@@ -450,24 +387,16 @@ static Value quiescence(Position& pos, Value alpha, Value beta, int ply, SearchW
         }
         if (alpha >= beta) {
             flag = TT_BETA;
-            best_move = move;
+            best_move = list.moves[i];
             break;
         }
     }
 
     if (in_check && legal_moves == 0) {
-        if (!pruned_evasions) {
-            return -(VALUE_MATE - ply);
-        } else {
-            return alpha; // All evasions were bad (SEE < 0), return alpha to fail low
-        }
+        return -(VALUE_MATE - ply);
     }
 
-    // Ply-adjust mate scores before storing in TT
-    Value qs_store = best_value;
-    if (qs_store >= VALUE_MATE - 500) qs_store += ply;
-    else if (qs_store <= -VALUE_MATE + 500) qs_store -= ply;
-    record_tt(pos.zobristKey, 0, qs_store, flag, best_move);
+    record_tt(pos.zobristKey, 0, best_value, flag, best_move);
     return best_value;
 }
 
@@ -531,13 +460,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     }
 
     bool in_check = pos.is_attacked(pos.get_king_square(pos.sideToMove), ~pos.sideToMove);
-    Value raw_static_eval = evaluate(pos, false);
-    Value static_eval = raw_static_eval;
-    if (!in_check) {
-        int ch_idx = pos.pawnKey & 16383;
-        int offset = sw.correction_history[static_cast<int>(pos.sideToMove)][ch_idx];
-        static_eval = std::clamp(static_eval + offset / 256, -VALUE_MATE + 1, VALUE_MATE - 1);
-    }
+    Value static_eval = evaluate(pos, false);
     sw.static_evals[ply] = static_eval;
 
     bool improving = false;
@@ -577,7 +500,7 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
 
     // Singular Extension (SE)
     // Ensure we have a valid lower bound from a sufficient depth
-    if (depth >= 6 && tt_move != MOVE_NONE && excluded_move == MOVE_NONE 
+    if (depth >= 8 && tt_move != MOVE_NONE && excluded_move == MOVE_NONE 
         && tt_depth >= depth - 3 && tt_flag != TT_ALPHA && value_abs(tt_score) < VALUE_MATE_IN_2) {
         
         int se_depth = (depth - 1) / 2;
@@ -602,10 +525,30 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         }
     }
 
-
-
-
-
+    // ProbCut
+    if (!pv_node && !is_null && depth >= 5 && !in_check && abs(beta) < VALUE_MATE - 500) {
+        Value prob_beta = beta + 150;
+        MoveList pc_list;
+        MoveGen::generate_legal_moves(pos, pc_list);
+        sort_moves(pos, pc_list, tt_move, sw, ply, prev_move);
+        bool prob_cut = false;
+        for (int i = 0; i < pc_list.size(); ++i) {
+            Move m = pc_list.moves[i];
+            if (pos.piece_on(move_to(m)) == Piece::PIECE_NONE && move_prom(m) == PieceType::NONE) continue;
+            if (!see_ge(pos, m, 1)) continue;
+            
+            Position next_pos = pos;
+            if (!next_pos.make_move(m)) continue;
+            NnueGuard guard(m);
+            Value pc_score = -negamax(next_pos, depth - 4, ply + 1, -prob_beta, -prob_beta + 1, false, sw, m);
+            if (TimeManager::stop_search) return 0;
+            if (pc_score >= prob_beta) {
+                prob_cut = true;
+                break;
+            }
+        }
+        if (prob_cut) return prob_beta;
+    }
 
     // Razoring
     if (!pv_node && !is_null && depth <= 3 && !in_check && abs(beta) < VALUE_MATE - 500) {
@@ -634,11 +577,14 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         }
     }
 
-    // Internal Iterative Reduction (IIR) - replaces wasteful IID
-    // When we have no TT move, reduce depth instead of doing a full sub-search.
-    // This saves enormous amounts of nodes compared to IID.
-    if (depth >= 4 && tt_move == MOVE_NONE && !is_null) {
-        depth -= (pv_node ? 1 : 2);
+    // Internal Iterative Deepening (IID)
+    if (depth >= 6 && tt_move == MOVE_NONE && !is_null && !in_check) {
+        int iid_depth = pv_node ? depth - 2 : depth / 2;
+        negamax(pos, iid_depth, ply, alpha, beta, is_null, sw, prev_move, excluded_move);
+        Value dummy_score;
+        TTFlag dummy_flag;
+        int dummy_depth = 0;
+        probe_tt(pos.zobristKey, 0, alpha, beta, dummy_score, tt_move, dummy_flag, dummy_depth);
     }
 
     MoveList list;
@@ -667,44 +613,34 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
         sw.played_moves[ply] = list.moves[i];
         sw.played_pieces[ply] = pos.piece_on(move_from(list.moves[i]));
 
-        // Compute gives_check EARLY so pruning can use it
-        bool gives_check = next_pos.is_attacked(
-            next_pos.get_king_square(next_pos.sideToMove), ~next_pos.sideToMove);
-
         bool is_quiet = (pos.piece_on(move_to(list.moves[i])) == Piece::PIECE_NONE
                       && move_prom(list.moves[i]) == PieceType::NONE);
 
         bool is_killer = (list.moves[i] == sw.killer_moves[ply][0] || list.moves[i] == sw.killer_moves[ply][1]);
 
-        // Late Move Pruning (LMP) — extended to depth 8 with Stockfish-style thresholds
-        if (!pv_node && depth <= 8 && !in_check && is_quiet && !is_killer && !gives_check
-            && abs(best_value) < VALUE_MATE - 500) {
-            int lmp_threshold = (3 + depth * depth) / (2 - improving);
-            if (legal_moves > lmp_threshold) continue;
+        // Late Move Pruning (LMP)
+        if (!pv_node && depth <= 3 && !in_check && is_quiet && !is_killer) {
+            int lmp_thresholds[] = {0, 8, 12, 24};
+            if (legal_moves > lmp_thresholds[depth]) continue;
         }
 
-        // History Pruning — extended to depth 8
-        if (!pv_node && depth <= 8 && is_quiet && !is_killer && !gives_check) {
+        // History Pruning
+        if (!pv_node && depth <= 4 && is_quiet && !is_killer) {
             int hist = get_stat_score(pos, list.moves[i], sw, ply);
-            if (hist < -2000 * depth) continue;
+            if (hist < -3000 * depth) continue;
         }
 
-        // SEE Pruning for captures — extended to depth 9
-        if (!pv_node && depth <= 9 && !in_check && !is_killer && !is_quiet) {
-            int see_threshold = -80 * depth * depth;
+        // PVS SEE Pruning
+        if (!pv_node && depth <= 4 && !in_check && !is_killer && !is_quiet) {
+            int see_threshold = -200 * depth;
             if (!see_ge(pos, list.moves[i], see_threshold)) continue;
         }
 
-        // SEE Pruning for quiet moves — prune moves where piece is hanging
-        if (!pv_node && depth <= 8 && !in_check && !is_killer && is_quiet && !gives_check) {
-            if (!see_ge(pos, list.moves[i], -50 * depth)) continue;
-        }
-
-        // Futility Pruning — tightened margins
-        if (!pv_node && depth <= 9 && is_quiet && !is_killer && !in_check && !gives_check
-            && abs(alpha) < VALUE_MATE - 500) {
+        // Futility Pruning
+        if (!pv_node && depth <= 8 && is_quiet && !is_killer && !in_check && abs(alpha) < VALUE_MATE - 500) {
             int hist = get_stat_score(pos, list.moves[i], sw, ply);
-            int fp_margin = depth * 90 + std::max(0, hist / 256);
+            int fp_margin = depth * 100 + hist / 256;
+            if (fp_margin < 0) fp_margin = 0; // Prevent negative margin from aggressively pruning everything
             if (static_eval + fp_margin <= alpha) continue;
         }
 
@@ -714,30 +650,11 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
             captures_searched[capture_count++] = list.moves[i];
         }
 
-        // === Extensions ===
         int current_extension = 0;
-
-        // Check extension
-        if (gives_check) {
-            current_extension = 1;
-        }
-
-        // Passed pawn extension (pawn push to 6th or 7th rank)
-        if (current_extension == 0) {
-            PieceType moving_pt = piece_type(pos.piece_on(move_from(list.moves[i])));
-            if (moving_pt == PieceType::PAWN) {
-                int to_rank = static_cast<int>(move_to(list.moves[i])) / 8;
-                bool advanced = (pos.sideToMove == Color::WHITE && to_rank >= 5) ||
-                                (pos.sideToMove == Color::BLACK && to_rank <= 2);
-                if (advanced) current_extension = 1;
-            }
-        }
-
-        // Singular extension
         if (singular_extension) {
             if (list.moves[i] == tt_move) {
-                current_extension = std::max(current_extension, 1 + double_extension);
-            } else if (!gives_check) {
+                current_extension = 1 + double_extension;
+            } else {
                 current_extension = -1;
             }
         }
@@ -747,49 +664,21 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
             val = -negamax(next_pos, depth - 1 + current_extension, ply + 1, -beta, -alpha, false, sw, list.moves[i]);
             if (TimeManager::stop_search) return 0;
         } else {
-            // LMR: Late Move Reductions
-            int reduction = 0;
-            bool do_lmr = false;
-
-            if (depth >= 2 && legal_moves >= 2) {
-                if (is_quiet) {
-                    // Quiet move LMR
-                    reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
-
-                    // Adjustments
-                    if (pv_node) reduction -= 1;
-                    if (is_killer) reduction -= 2;
-                    if (!improving) reduction += 1;
-                    if (gives_check) reduction -= 1;
-
-                    // History-based adjustment
-                    int hist = get_stat_score(pos, list.moves[i], sw, ply);
-                    int hist_reduction = hist / 8192;
-                    reduction -= hist_reduction;
-                    
-                    if (hist < -10000) reduction += 1;
-                    if (hist > 10000) reduction -= 1;
-
-                    // Clamp: never reduce to depth < 1
-                    reduction = std::max(0, std::min(reduction, depth - 2));
-                    do_lmr = (reduction > 0);
-
-                } else if (legal_moves >= 4 && !gives_check) {
-                    // Capture LMR: reduce captures with bad capture history
-                    int a = static_cast<int>(pos.piece_on(move_from(list.moves[i])));
-                    int to = static_cast<int>(move_to(list.moves[i]));
-                    int v = static_cast<int>(pos.piece_on(static_cast<Square>(to)));
-                    if (v != static_cast<int>(Piece::PIECE_NONE)) {
-                        int cap_hist = sw.capture_history[a][to][v];
-                        if (cap_hist < -2000) {
-                            reduction = 1;
-                            do_lmr = true;
-                        }
-                    }
-                }
-            }
-
-            if (do_lmr) {
+            if (depth >= 3 && legal_moves >= 2 && is_quiet) {
+                int reduction = LMRTable[std::min(depth, 63)][std::min(legal_moves, 63)];
+                if (pv_node) reduction--;
+                if (is_killer) reduction--;
+                if (!improving) reduction++;
+                
+                int hist = get_stat_score(pos, list.moves[i], sw, ply);
+                
+                int hist_reduction = hist / 8192;
+                reduction -= hist_reduction;
+                
+                if (hist < -10000) reduction += 1;
+                if (hist > 10000) reduction -= 1;
+                
+                reduction = std::max(0, std::min(reduction, depth - 1));
                 int reduced_depth = std::max(1, depth - 1 + current_extension - reduction);
                 val = -negamax(next_pos, reduced_depth, ply + 1, -alpha - 1, -alpha, false, sw, list.moves[i]);
                 if (TimeManager::stop_search) return 0;
@@ -831,7 +720,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                         sw.killer_moves[ply][1] = sw.killer_moves[ply][0];
                         sw.killer_moves[ply][0] = list.moves[i];
                     }
-                    int bonus = std::min(16 * depth * depth + 120, 1800);
+                    int bonus = depth * depth;
+                    if (bonus > 400) bonus = 400; // Cap bonus
                     
                     int us = static_cast<int>(pos.sideToMove);
                     int from = static_cast<int>(move_from(list.moves[i]));
@@ -848,16 +738,6 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                         int prev2_p = static_cast<int>(sw.played_pieces[ply - 2]);
                         int prev2_to = static_cast<int>(move_to(sw.played_moves[ply - 2]));
                         sw.continuation_history[1][prev2_p][prev2_to][p][to] += bonus - sw.continuation_history[1][prev2_p][prev2_to][p][to] * abs(bonus) / 16384;
-                    }
-                    if (ply >= 4 && sw.played_moves[ply - 4] != MOVE_NONE) {
-                        int prev4_p = static_cast<int>(sw.played_pieces[ply - 4]);
-                        int prev4_to = static_cast<int>(move_to(sw.played_moves[ply - 4]));
-                        sw.continuation_history[2][prev4_p][prev4_to][p][to] += bonus - sw.continuation_history[2][prev4_p][prev4_to][p][to] * abs(bonus) / 16384;
-                    }
-                    if (ply >= 6 && sw.played_moves[ply - 6] != MOVE_NONE) {
-                        int prev6_p = static_cast<int>(sw.played_pieces[ply - 6]);
-                        int prev6_to = static_cast<int>(move_to(sw.played_moves[ply - 6]));
-                        sw.continuation_history[3][prev6_p][prev6_to][p][to] += bonus - sw.continuation_history[3][prev6_p][prev6_to][p][to] * abs(bonus) / 16384;
                     }
 
                     for (int q = 0; q < quiet_count - 1; ++q) {
@@ -876,16 +756,6 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                             int prev2_to = static_cast<int>(move_to(sw.played_moves[ply - 2]));
                             sw.continuation_history[1][prev2_p][prev2_to][q_p][q_to] -= bonus + sw.continuation_history[1][prev2_p][prev2_to][q_p][q_to] * abs(bonus) / 16384;
                         }
-                        if (ply >= 4 && sw.played_moves[ply - 4] != MOVE_NONE) {
-                            int prev4_p = static_cast<int>(sw.played_pieces[ply - 4]);
-                            int prev4_to = static_cast<int>(move_to(sw.played_moves[ply - 4]));
-                            sw.continuation_history[2][prev4_p][prev4_to][q_p][q_to] -= bonus + sw.continuation_history[2][prev4_p][prev4_to][q_p][q_to] * abs(bonus) / 16384;
-                        }
-                        if (ply >= 6 && sw.played_moves[ply - 6] != MOVE_NONE) {
-                            int prev6_p = static_cast<int>(sw.played_pieces[ply - 6]);
-                            int prev6_to = static_cast<int>(move_to(sw.played_moves[ply - 6]));
-                            sw.continuation_history[3][prev6_p][prev6_to][q_p][q_to] -= bonus + sw.continuation_history[3][prev6_p][prev6_to][q_p][q_to] * abs(bonus) / 16384;
-                        }
                     }
                     for (int c = 0; c < capture_count; ++c) {
                         int c_from = static_cast<int>(move_from(captures_searched[c]));
@@ -902,7 +772,8 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
                         sw.counter_moves[static_cast<int>(move_from(prev_move))][static_cast<int>(move_to(prev_move))] = list.moves[i];
                     }
                 } else {
-                    int bonus = std::min(16 * depth * depth + 120, 1800);
+                    int bonus = depth * depth;
+                    if (bonus > 400) bonus = 400; // Cap bonus
                     int a = static_cast<int>(pos.piece_on(move_from(list.moves[i])));
                     int to = static_cast<int>(move_to(list.moves[i]));
                     int v = static_cast<int>(pos.piece_on(static_cast<Square>(to)));
@@ -952,15 +823,6 @@ static Value negamax(Position& pos, int depth, int ply, Value alpha, Value beta,
     else if (tt_store_value <= -VALUE_MATE + 500) tt_store_value -= ply;
 
     if (excluded_move == MOVE_NONE) {
-        if (!in_check && abs(best_value) < VALUE_MATE - 500 && depth >= 0) {
-            int bonus = best_value - raw_static_eval;
-            bonus = std::clamp(bonus, -1000, 1000); // cap diff
-            int weight = depth < 16 ? depth : 16;
-            int ch_idx = pos.pawnKey & 16383;
-            int& ch = sw.correction_history[static_cast<int>(pos.sideToMove)][ch_idx];
-            ch = (ch * (256 - weight) + bonus * 256 * weight) / 256;
-            ch = std::clamp(ch, -32000, 32000);
-        }
         record_tt(pos.zobristKey, depth, tt_store_value, flag, best_move);
     }
     return best_value;
@@ -1022,11 +884,6 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
         }
     }
 
-
-    uint64_t root_move_nodes[MAX_MOVES] = {0};
-    Move root_moves[MAX_MOVES] = {MOVE_NONE};
-    int root_move_count = 0;
-
     for (int d = 1; d <= max_depth; ++d) {
         if (TimeManager::stop_search) break;
 
@@ -1059,14 +916,9 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
             int legal_moves = 0;
 
             for (int i = 0; i < list.size(); ++i) {
-                if (d == 1 && root_move_count < MAX_MOVES) {
-                    root_moves[root_move_count++] = list.moves[i];
-                }
-                
                 Position next_pos = pos;
                 if (!next_pos.make_move(list.moves[i])) continue;
 
-                uint64_t nodes_before = sw.node_count;
                 NnueGuard guard(list.moves[i]);
                 Value val;
                 if (legal_moves == 0) {
@@ -1091,15 +943,6 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
                 }
                 if (val > alpha) {
                     alpha = val;
-                }
-
-
-                uint64_t nodes_spent = sw.node_count - nodes_before;
-                for (int m_idx = 0; m_idx < root_move_count; ++m_idx) {
-                    if (root_moves[m_idx] == list.moves[i]) {
-                        root_move_nodes[m_idx] += nodes_spent;
-                        break;
-                    }
                 }
 
                 legal_moves++;
@@ -1174,14 +1017,6 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
             
             // Time check for normal moves (evaluate SOFT limit at root)
             if (thread_id == 0 && TimeManager::optimum_time != 999999999) {
-                uint64_t best_nodes = 0;
-                for (int m_idx = 0; m_idx < root_move_count; ++m_idx) {
-                    if (root_moves[m_idx] == best_root_move) {
-                        best_nodes = root_move_nodes[m_idx];
-                        break;
-                    }
-                }
-                TimeManager::scale_time_for_nodes(best_nodes, sw.node_count);
                 TimeManager::check_time_at_root();
                 if (TimeManager::stop_search) {
                     break;
@@ -1191,8 +1026,8 @@ Move search_position(Position& pos, int max_depth, int thread_id) {
             best_root_move = sw.pv_array[0][0];
         }
 
-        // Early termination: break if we found a forced mate in 1
-        if (value_abs(best_value) >= VALUE_MATE - 1) {
+        // Early termination: Only break if it's a guaranteed Mate-in-1
+        if (best_value == VALUE_MATE_IN_1 || best_value == -VALUE_MATE_IN_1) {
             break;
         }
     }

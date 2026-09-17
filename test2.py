@@ -1,21 +1,16 @@
 import subprocess
+import time
 
-sic = subprocess.Popen(["./sic"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+p = subprocess.Popen(["./sic"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 def send(cmd):
-    sic.stdin.write(cmd + "\n")
-    sic.stdin.flush()
+    p.stdin.write(cmd + "\n")
+    p.stdin.flush()
 
-# FEN after White plays a1c1
-send("position fen r2rb1k1/1p1nbppp/p1n1p3/q3P3/P1B1N3/1P3N2/1B2QPPP/2RR2K1 b - - 4 17")
-send("go depth 11")
+send("position fen r5k1/5ppp/4pn2/p7/P1N2B2/5Q2/q4bPP/3R3K w - - 1 28")
+send("go depth 4")
+time.sleep(2)
+send("quit")
 
-while True:
-    line = sic.stdout.readline()
-    if not line:
-        break
-    print(line.strip())
-    if "bestmove" in line:
-        break
-
-sic.terminate()
+out, _ = p.communicate()
+print(out)

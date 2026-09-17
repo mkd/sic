@@ -1,0 +1,10 @@
+Game 1: Sic (W) vs Gar (B) -> 1/2-1/2
+Game 2: Gar (W) vs Sic (B) -> 0-1
+Score -> Sic: 1, Gargantua: 0, Draws: 1
+Game 3: Sic (W) vs Gar (B) -> 1-0
+Game 4: Gar (W) vs Sic (B) -> 0-1
+Score -> Sic: 3, Gargantua: 0, Draws: 1
+Game 5: Sic (W) vs Gar (B) -> 1-0
+Game 6: Gar (W) vs Sic (B) -> 1/2-1/2
+Score -> Sic: 4, Gargantua: 0, Draws: 2
+Game 7: Sic (W) vs Gar (B) -> 1/2-1/2

@@ -1,0 +1,6 @@
+(lldb) target create "./sic"
+Current executable set to '/Users/claudio/Library/CloudStorage/GoogleDrive-claudiomkd@gmail.com/My Drive/projects/Chess/sic/sic' (arm64).
+(lldb) command source -s 0 'lldb_cmds.txt'
+Executing commands in '/Users/claudio/Library/CloudStorage/GoogleDrive-claudiomkd@gmail.com/My Drive/projects/Chess/sic/lldb_cmds.txt'.
+(lldb) process launch -i input.txt
+error: process exited with status -1 (attach failed ((os/kern) invalid address))

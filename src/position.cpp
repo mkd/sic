@@ -258,6 +258,7 @@ bool Position::make_move(Move m) {
 
     // --- Handle moving piece ---
     zobristKey ^= ZobristPiece[static_cast<int>(moving_piece)][from_int];
+    if (piece_type(moving_piece) == PieceType::PAWN) pawnKey ^= ZobristPiece[static_cast<int>(moving_piece)][from_int];
 
     // --- Move the piece on the board ---
     board[from_int] = Piece::PIECE_NONE;
@@ -267,6 +268,7 @@ bool Position::make_move(Move m) {
     // --- Handle capture ---
     if (captured_piece != Piece::PIECE_NONE) {
         zobristKey ^= ZobristPiece[static_cast<int>(captured_piece)][to_int];
+        if (piece_type(captured_piece) == PieceType::PAWN) pawnKey ^= ZobristPiece[static_cast<int>(captured_piece)][to_int];
         byTypeBB[static_cast<int>(captured_piece) % 6 + 1].bb &= ~(1ULL << to_int);
         byColorBB[static_cast<int>(them)].bb &= ~(1ULL << to_int);
     }
@@ -278,6 +280,7 @@ bool Position::make_move(Move m) {
     byTypeBB[static_cast<int>(placed_piece) % 6 + 1].bb |= (1ULL << to_int);
     byColorBB[static_cast<int>(us)].bb |= (1ULL << to_int);
     zobristKey ^= ZobristPiece[static_cast<int>(placed_piece)][to_int];
+    if (piece_type(placed_piece) == PieceType::PAWN) pawnKey ^= ZobristPiece[static_cast<int>(placed_piece)][to_int];
 
     // --- En Passant capture ---
     if (flag == MOVE_FLAG_ENPASSANT) {
@@ -392,6 +395,7 @@ void Position::set_fen(const std::string& fen) {
     halfmoveClock = 0;
     fullmoveNumber = 1;
     zobristKey = 0;
+    pawnKey = 0;
 
     set_check_info();
     std::istringstream iss(fen);
@@ -414,6 +418,7 @@ void Position::set_fen(const std::string& fen) {
                 byTypeBB[pt_idx].bb |= (1ULL << sq);
                 byColorBB[static_cast<int>(color_of(p))].bb |= (1ULL << sq);
                 zobristKey ^= ZobristPiece[static_cast<int>(p)][sq];
+                if (piece_type(p) == PieceType::PAWN) pawnKey ^= ZobristPiece[static_cast<int>(p)][sq];
             }
             ++sq;
         }

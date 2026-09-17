@@ -64,6 +64,7 @@ public:
     int halfmoveClock;
     int fullmoveNumber;
     uint64_t zobristKey;
+    uint64_t pawnKey;
 
     Bitboard checkers;
     Bitboard blockersForKing[2];

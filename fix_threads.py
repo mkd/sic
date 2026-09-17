@@ -1,4 +1,52 @@
-#include "../include/thread.h"
+import sys
+
+# Update thread.h
+with open('include/thread.h', 'r') as f:
+    content = f.read()
+
+replacement = """#include <mutex>
+#include <condition_variable>
+#include <memory>
+#include <deque>
+
+namespace Stockfish {
+    struct Position;
+    struct StateInfo;
+}
+
+struct SearchWorker {
+"""
+content = content.replace("struct SearchWorker {", replacement)
+
+thread_struct = """struct Thread {
+    std::thread stdThread;
+    Position rootPos;
+    int id;
+    SearchWorker sw;
+    Move best_move;
+    int max_depth;
+    
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool is_searching;
+    bool should_exit;
+    
+    std::shared_ptr<Stockfish::Position> sync_pos;
+    std::shared_ptr<std::deque<Stockfish::StateInfo>> sync_setup;
+
+    Thread(int thread_id) : id(thread_id), best_move(MOVE_NONE), max_depth(0), is_searching(false), should_exit(false) {}
+
+    void search();
+    void loop();
+};"""
+import re
+content = re.sub(r'struct Thread \{.*?\};', thread_struct, content, flags=re.DOTALL)
+
+with open('include/thread.h', 'w') as f:
+    f.write(content)
+
+# Update thread.cpp
+cpp_content = """#include "../include/thread.h"
 #include "../include/search.h"
 #include "stockfish_probe/nnue_incremental.h"
 
@@ -88,3 +136,7 @@ Move start_search(Position& pos, int max_depth) {
 }
 
 } // namespace ThreadPool
+"""
+
+with open('src/thread.cpp', 'w') as f:
+    f.write(cpp_content)

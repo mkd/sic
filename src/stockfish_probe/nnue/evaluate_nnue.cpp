@@ -225,7 +225,7 @@ Value evaluate(const Position &pos, bool adjusted, int *complexity) {
 
   ASSERT_ALIGNED(transformedFeatures, alignment);
 
-  const int bucket = (pos.count<ALL_PIECES>() - 1) / 4;
+  int c = pos.count<ALL_PIECES>(); if (c > 32 || c <= 0) { printf("CORRUPTED BOARD: %d pieces\n", c); fflush(stdout); abort(); } const int bucket = (c - 1) / 4;
   const auto psqt =
       Net_Size == Small
           ? featureTransformerSmall->transform(pos, transformedFeatures, bucket)

@@ -154,12 +154,11 @@ int Eval::simple_eval(const Position &pos, Color c) {
          (pos.non_pawn_material(c) - pos.non_pawn_material(~c));
 }
 
+
+
+
 Value Eval::evaluate(const Position &pos, bool force_small) {
-  if (pos.state() == nullptr) {
-      fprintf(stderr, "CRITICAL ERROR: pos.state() is nullptr in evaluate! pos=%p\n", (const void*)&pos);
-      fflush(stderr);
-      abort();
-  }
+  if (pos.state() == nullptr) abort();
 
   int simpleEval = simple_eval(pos, pos.side_to_move());
   bool smallNet = force_small || (std::abs(simpleEval) > 1050);
@@ -170,22 +169,20 @@ Value Eval::evaluate(const Position &pos, bool force_small) {
                    ? NNUE::evaluate<NNUE::Small>(pos, true, &nnueComplexity)
                    : NNUE::evaluate<NNUE::Big>(pos, true, &nnueComplexity);
 
-
   nnue -= nnue * (nnueComplexity + std::abs(simpleEval - nnue)) / 32768;
 
   int npm = pos.non_pawn_material() / 64;
   int v = (nnue * (915 + npm + 9 * pos.count<PAWN>())) / 1024;
 
-  // Damp down the evaluation linearly when shuffling
   int shuffling = pos.rule50_count();
   v = v * (200 - shuffling) / 214;
 
-  // Guarantee evaluation does not hit the tablebase range
   v = std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);
-
   v += mop_up(pos, pos.side_to_move());
-
 
   return v;
 }
+
+
+
 } // namespace Stockfish

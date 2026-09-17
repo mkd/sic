@@ -312,6 +312,7 @@ bool uci_execute_line(const std::string& line) {
         for (int i = 0; i < list.size(); ++i) {
             std::cout << move_to_str(list.moves[i]) << "\n";
         }
+    
     } else if (cmd == "keys") {
         std::cout << "Game history keys:\n";
         for (size_t i = 0; i < g_gameHistory.size(); ++i) {

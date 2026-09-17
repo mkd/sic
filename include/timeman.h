@@ -14,6 +14,7 @@ void check_time_at_root();
 
 void extend_time_for_instability();
 void extend_time_for_score_drop();
+void scale_time_for_nodes(uint64_t best_move_nodes, uint64_t total_nodes);
 
 extern uint64_t start_time;
 extern uint64_t base_optimum_time;
