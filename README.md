@@ -9,7 +9,7 @@ With Version 2.0, Sic has undergone a **Huge Upgrade** incorporating Stockfish 1
 ## Core Architecture
 
 * **Language:** Modern C++20 (Cross-platform support including Linux and macOS Apple Silicon).
-* **Evaluation:** NNUE (Efficiently Updatable Neural Networks). Sic uses a highly optimized C++ bridge incorporating Stockfish 16.1's native `SFNNv10` architecture. It features a 2560-dimension incremental accumulator (`HalfKAv2_hm`) that updates purely on the differences between moves, guaranteeing massive Nodes-Per-Second (NPS) throughput.
+* **Evaluation:** NNUE (Efficiently Updatable Neural Networks). Sic uses a highly optimized C++ bridge incorporating Stockfish 18/19 native architecture. It features a 2560-dimension incremental accumulator (`HalfKAv2_hm`) that updates purely on the differences between moves, guaranteeing massive Nodes-Per-Second (NPS) throughput.
 * **Concurrency:** Lazy SMP (Symmetric Multiprocessing) up to 128 threads. Threads search the same tree concurrently, utilizing Root Move Rotations to naturally distribute workloads and prevent TT cache thrashing, allowing scaling to millions of nodes per second.
 * **Transposition Table:** 100% Lockless Hash Table with dynamic UCI resizing (`setoption name Hash`) and `hashfull` telemetry. Features TT Draw Bug prevention (safeguarding exact bounds on repetitions) and aggressive `__builtin_prefetch` instructions to hide memory access latency.
 * **Endgame Tablebases:** Seamless `Fathom` integration for 6-piece Syzygy tablebases, allowing the engine to instantly prove wins/draws/losses without searching.
@@ -42,7 +42,7 @@ Sic features a highly aggressive, state-of-the-art search tree designed to heavi
 * **Static Exchange Evaluation (SEE) Pruning:** Simulates captures statically to prune materially losing sequences.
 
 ## Time Management
-* **Stability-Based Scaling:** Sic analyzes the stability of the root position. If the best move changes or the score drops significantly, Sic will aggressively scale its thinking time up to **4.0x** its base allocation, ensuring it takes its time in highly complex tactical positions without blundering.
+* **Gargantua-style Strict Boundaries:** Sic features a deeply overhauled time management system strictly modeled after the rigid boundaries used in Gargantua. It conservatively caps maximum thinking time per move to prevent blowing the clock in the opening. It still incorporates subtle stability-based scaling and node-confidence adjustments to ensure safety in sharp positions without compromising its end-game time reserves.
 
 ## Evaluation & Scaling
 Sic features a hyper-accurate implementation of Stockfish's NNUE architecture. A critical design decision in Sic is the native preservation of **internal NNUE units** (`~328 = 1 pawn`) throughout the entirety of the search algorithm.
@@ -79,4 +79,4 @@ If running directly from the terminal, Sic supports custom diagnostic commands:
 * `eval`: Prints the raw static NNUE evaluation of the current position in centipawns.
 * `moves` / `smoves`: Prints the legal moves generated for the position.
 
-*Note: Sic requires the `nn-baff1ede1f90.nnue` file in its root directory to evaluate positions.*
+*Note: Sic requires the `nn-83a0d6daf7e5.nnue` file in its root directory to evaluate positions.*
