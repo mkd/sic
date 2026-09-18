@@ -29,13 +29,15 @@ endif
 # --- Source Discovery ---
 SRCS      := $(wildcard $(SRCDIR)/*.cpp)
 PROBE_SRCS := $(wildcard $(SRCDIR)/stockfish_probe/*.cpp) \
-              $(SRCDIR)/stockfish_probe/nnue/evaluate_nnue.cpp \
-              $(SRCDIR)/stockfish_probe/nnue/features/half_ka_v2_hm.cpp
+              $(wildcard $(SRCDIR)/stockfish_probe/nnue/*.cpp) \
+              $(wildcard $(SRCDIR)/stockfish_probe/nnue/features/*.cpp) \
+              $(wildcard $(SRCDIR)/stockfish_probe/syzygy/*.cpp)
 C_SRCS    := $(SRCDIR)/tbprobe.c
 OBJS      := $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SRCS)) \
              $(patsubst $(SRCDIR)/stockfish_probe/%.cpp,$(OBJDIR)/stockfish_probe/%.o,$(wildcard $(SRCDIR)/stockfish_probe/*.cpp)) \
-             $(OBJDIR)/stockfish_probe/nnue/evaluate_nnue.o \
-             $(OBJDIR)/stockfish_probe/nnue/features/half_ka_v2_hm.o \
+             $(patsubst $(SRCDIR)/stockfish_probe/nnue/%.cpp,$(OBJDIR)/stockfish_probe/nnue/%.o,$(wildcard $(SRCDIR)/stockfish_probe/nnue/*.cpp)) \
+             $(patsubst $(SRCDIR)/stockfish_probe/nnue/features/%.cpp,$(OBJDIR)/stockfish_probe/nnue/features/%.o,$(wildcard $(SRCDIR)/stockfish_probe/nnue/features/*.cpp)) \
+             $(patsubst $(SRCDIR)/stockfish_probe/syzygy/%.cpp,$(OBJDIR)/stockfish_probe/syzygy/%.o,$(wildcard $(SRCDIR)/stockfish_probe/syzygy/*.cpp)) \
              $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(C_SRCS))
 DEPS      := $(OBJS:.o=.d)
 

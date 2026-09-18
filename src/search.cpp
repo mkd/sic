@@ -13,18 +13,18 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include "stockfish_probe/nnue_incremental.h"
+#include "stockfish_probe/sf_wrapper.h"
 
 struct NnueGuard {
     int move;
     bool is_null;
     NnueGuard(int m, bool null_move = false) : move(m), is_null(null_move) {
-        if (is_null) Stockfish::Incremental::push_null_state();
-        else Stockfish::Incremental::push_state(move);
+        if (is_null) StockfishWrapper::do_null_move();
+        else StockfishWrapper::do_move(move);
     }
     ~NnueGuard() {
-        if (is_null) Stockfish::Incremental::pop_state(0);
-        else Stockfish::Incremental::pop_state(move);
+        if (is_null) StockfishWrapper::undo_null_move();
+        else StockfishWrapper::undo_move(move);
     }
 };
 

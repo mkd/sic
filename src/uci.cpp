@@ -9,8 +9,8 @@
 #include "../include/evaluate.h"
 #include "../include/thread.h"
 #include "../include/tbprobe.h"
-#include "stockfish_probe/probe.h"
-#include "stockfish_probe/nnue_incremental.h"
+#include "stockfish_probe/sf_wrapper.h"
+
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -34,7 +34,7 @@ std::vector<uint64_t> g_gameHistory;
 // ---------------------------------------------------------------------------
 //  NNUE Network File Path (single HalfKP)
 // ---------------------------------------------------------------------------
-static std::string evalFile = "nn-b1a57edbea57.nnue";
+static std::string evalFile = "nn-83a0d6daf7e5.nnue";
 
 // ---------------------------------------------------------------------------
 //  Parse "position ..." command
@@ -57,7 +57,7 @@ static void parse_position(const std::string& args) {
 
     if (token == "startpos") {
         g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-        Stockfish::Incremental::setup_reset("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        StockfishWrapper::set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
         g_gameHistory.clear();
         g_gameHistory.push_back(g_pos.zobristKey);
@@ -69,7 +69,7 @@ static void parse_position(const std::string& args) {
                 while (iss >> m) {
                     Move mv = parse_move(g_pos, m);
                     if (mv != MOVE_NONE && g_pos.make_move(mv)) {
-                        Stockfish::Incremental::setup_move(mv);
+                        StockfishWrapper::do_move(mv);
                         g_gameHistory.push_back(g_pos.zobristKey);
                     }
                 }
@@ -85,7 +85,7 @@ static void parse_position(const std::string& args) {
         }
 
         g_pos.set_fen(fen);
-        Stockfish::Incremental::setup_reset(fen);
+        StockfishWrapper::set_fen(fen);
 
         g_gameHistory.clear();
         g_gameHistory.push_back(g_pos.zobristKey);
@@ -98,7 +98,7 @@ static void parse_position(const std::string& args) {
                 while (iss >> m) {
                     Move mv = parse_move(g_pos, m);
                     if (mv != MOVE_NONE && g_pos.make_move(mv)) {
-                        Stockfish::Incremental::setup_move(mv);
+                        StockfishWrapper::do_move(mv);
                         g_gameHistory.push_back(g_pos.zobristKey);
                     }
                 }
@@ -176,12 +176,10 @@ static void parse_go(const std::string& args) {
         search_thread.join();
     }
 
-    auto pos_ptr = std::make_shared<Stockfish::Position>();
-    std::memcpy(pos_ptr.get(), &Stockfish::Incremental::get_global_pos(), sizeof(Stockfish::Position));
-    auto setup_ptr = std::make_shared<std::deque<Stockfish::StateInfo>>(Stockfish::Incremental::get_setup_states());
-
-    search_thread = std::thread([max_depth, pos_ptr, setup_ptr]() {
-        Stockfish::Incremental::sync_from_main_thread(*pos_ptr, *setup_ptr);
+    auto state_ptr = std::make_shared<StockfishWrapper::ThreadState>(StockfishWrapper::get_thread_state());
+    search_thread = std::thread([max_depth, state_ptr]() {
+        StockfishWrapper::init_thread();
+        StockfishWrapper::sync_thread_state(*state_ptr);
         inc_tt_age();
         Move best = ThreadPool::start_search(g_pos, max_depth);
         std::cout << "bestmove " << move_to_str(best) << std::endl;
@@ -228,7 +226,7 @@ bool uci_execute_line(const std::string& line) {
         std::cout << "option name Threads type spin default 9 min 1 max 128" << std::endl;
         std::cout << "option name Hash type spin default 4096 min 1 max 131072" << std::endl;
         std::cout << "option name Clear Hash type button" << std::endl;
-        std::cout << "option name EvalFile type string default nn-b1a57edbea57.nnue" << std::endl;
+        std::cout << "option name EvalFile type string default nn-83a0d6daf7e5.nnue" << std::endl;
         std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
         std::cout << "uciok" << std::endl;
     } else if (cmd == "isready") {
@@ -268,7 +266,7 @@ bool uci_execute_line(const std::string& line) {
 
         if (name == "EvalFile") {
             evalFile = value;
-            Stockfish::Probe::init(evalFile.c_str(), "nn-baff1ede1f90.nnue");
+            
         } else if (name == "Threads") {
             ThreadPool::set_thread_count(std::stoi(value));
         } else if (name == "Hash") {
@@ -358,11 +356,11 @@ bool uci_execute_line(const std::string& line) {
 }
 
 void uci_init() {
-    Stockfish::Probe::init("nn-b1a57edbea57.nnue", "nn-baff1ede1f90.nnue");
-    Stockfish::Incremental::init();
+    
+    
 
     g_pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-    Stockfish::Incremental::setup_reset("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    StockfishWrapper::set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 }
 
 void uci_loop() {

@@ -1,13 +1,13 @@
 #include "../include/thread.h"
 #include "../include/search.h"
-#include "stockfish_probe/nnue_incremental.h"
+#include "stockfish_probe/sf_wrapper.h"
 
 void Thread::search() {
     best_move = search_position(rootPos, max_depth, id);
 }
 
 void Thread::loop() {
-    Stockfish::Incremental::init(); // Initialize thread-local NNUE once
+    StockfishWrapper::init_thread(); // Initialize thread-local NNUE once
     
     while (true) {
         std::unique_lock<std::mutex> lock(mtx);
@@ -18,7 +18,7 @@ void Thread::loop() {
         }
         
         // Sync NNUE state before search
-        Stockfish::Incremental::sync_from_main_thread(*sync_pos, *sync_setup);
+        StockfishWrapper::sync_thread_state(*sync_state);
         
         // Run search
         search();
@@ -60,9 +60,7 @@ void set_thread_count(int count) {
 }
 
 Move start_search(Position& pos, int max_depth) {
-    auto pos_ptr = std::make_shared<Stockfish::Position>();
-    std::memcpy(pos_ptr.get(), &Stockfish::Incremental::get_global_pos(), sizeof(Stockfish::Position));
-    auto setup_ptr = std::make_shared<std::deque<Stockfish::StateInfo>>(Stockfish::Incremental::get_setup_states());
+    auto state_ptr = std::make_shared<StockfishWrapper::ThreadState>(StockfishWrapper::get_thread_state());
 
     // Wake up all threads
     for (Thread* t : threads) {
@@ -71,8 +69,7 @@ Move start_search(Position& pos, int max_depth) {
             t->rootPos = pos;
             t->best_move = MOVE_NONE;
             t->max_depth = max_depth;
-            t->sync_pos = pos_ptr;
-            t->sync_setup = setup_ptr;
+            t->sync_state = state_ptr;
             t->is_searching = true;
         }
         t->cv.notify_one();

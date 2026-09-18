@@ -1,3 +1,4 @@
+#include "../src/stockfish_probe/sf_wrapper.h"
 #pragma once
 
 #include <thread>
@@ -85,8 +86,7 @@ struct Thread {
     bool is_searching;
     bool should_exit;
     
-    std::shared_ptr<Stockfish::Position> sync_pos;
-    std::shared_ptr<std::deque<Stockfish::StateInfo>> sync_setup;
+    std::shared_ptr<StockfishWrapper::ThreadState> sync_state;
 
     Thread(int thread_id) : id(thread_id), best_move(MOVE_NONE), max_depth(0), is_searching(false), should_exit(false) {}
 

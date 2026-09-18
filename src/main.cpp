@@ -4,6 +4,7 @@
 #include "../include/uci.h"
 #include "../include/tt.h"
 #include "../include/thread.h"
+#include "../src/stockfish_probe/sf_wrapper.h"
 #include <iostream>
 #include <string>
 #include <thread>
@@ -15,6 +16,8 @@ int main(int argc, char* argv[]) {
     init_zobrist();
     init_tt(4096);
     init_lmr();
+    StockfishWrapper::init();
+    StockfishWrapper::init_thread();
     ThreadPool::init();
     uci_init();
 
