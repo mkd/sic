@@ -7,7 +7,7 @@ namespace TimeManager {
 
 uint64_t get_time_ms();
 
-void init_timer(int time_left_ms, int increment_ms);
+void init_timer(int time_left_ms, int increment_ms, int moves_to_go);
 
 void check_time();
 void check_time_at_root();

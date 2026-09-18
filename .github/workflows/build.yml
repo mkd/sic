@@ -44,7 +44,7 @@ jobs:
 
       - name: Download Network and Run Engine
         run: |
-          wget https://tests.stockfishchess.org/api/nn/nn-62ef826d1a6d.nnue
+          wget https://tests.stockfishchess.org/api/nn/nn-b1a57edbea57.nnue
           chmod +x sic
           echo "quit" | ./sic
 

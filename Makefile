@@ -78,7 +78,12 @@ ifeq ($(ARCH),native)
     CXXFLAGS += -DUSE_NEON=8 -DUSE_NEON_DOTPROD -march=armv8.2-a+dotprod
   endif
   ifneq ($(filter %86 x86_64,$(UNAME_M)),)
-    CXXFLAGS += -DUSE_AVX2 -mavx2 -mbmi2 -mpopcnt
+    HAS_AVX2 := $(shell grep -q avx2 /proc/cpuinfo 2>/dev/null && echo 1 || sysctl -n hw.optional.avx2_0 2>/dev/null || echo 0)
+    ifeq ($(HAS_AVX2),1)
+      CXXFLAGS += -DUSE_AVX2 -mavx2 -mbmi2 -mpopcnt
+    else
+      CXXFLAGS += -mpopcnt
+    endif
   endif
 else ifeq ($(ARCH),apple-silicon)
   CXXFLAGS += -mcpu=apple-m1 -DUSE_NEON=8 -DUSE_NEON_DOTPROD

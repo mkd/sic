@@ -115,7 +115,7 @@ static void parse_go(const std::string& args) {
     std::string token;
     int max_depth = 64;
     bool has_time = false;
-    int wtime = 300000, btime = 300000, winc = 0, binc = 0;
+    int wtime = 300000, btime = 300000, winc = 0, binc = 0, movestogo = 0;
     int movetime_ms = 0;
     bool infinite = false;
 
@@ -137,6 +137,8 @@ static void parse_go(const std::string& args) {
             iss >> winc;
         } else if (token == "binc") {
             iss >> binc;
+        } else if (token == "movestogo") {
+            iss >> movestogo;
         } else if (token == "movetime") {
             iss >> movetime_ms;
             has_time = true;
@@ -159,7 +161,7 @@ static void parse_go(const std::string& args) {
             TimeManager::start_time = TimeManager::get_time_ms();
             TimeManager::stop_search = false;
         } else {
-            TimeManager::init_timer(time_left, increment);
+            TimeManager::init_timer(time_left, increment, movestogo);
         }
     } else {
         TimeManager::optimum_time = 999999999;

@@ -16,16 +16,27 @@ uint64_t get_time_ms() {
     ).count();
 }
 
-void init_timer(int time_left_ms, int increment_ms) {
+void init_timer(int time_left_ms, int increment_ms, int moves_to_go) {
     // 1. Calculate a safe maximum time (leave 50ms for network/GUI overhead)
     uint64_t safe_max = std::max(0, time_left_ms - 50);
 
-    // 2. Soft Time: Target time we want to spend (usually time_left / 25)
-    base_optimum_time = (time_left_ms / 25) + (increment_ms * 3 / 4);
-    optimum_time = base_optimum_time;
+    // Default moves to go if sudden death
+    if (moves_to_go == 0) {
+        moves_to_go = 40;
+    }
+
+    // 2. Soft Time: Target time we want to spend
+    // Stockfish uses time_left / mtg + increment * 0.75
+    // To prevent spending too much time early, we slightly inflate mtg or use a constant curve.
+    double mtg = moves_to_go;
+    base_optimum_time = static_cast<uint64_t>((time_left_ms / (mtg + 2)) + (increment_ms * 3 / 4));
     
-    // 3. Hard Time: Absolute maximum we can spend (approx time_left / 4 + increment)
-    maximum_time = std::min(static_cast<uint64_t>(safe_max), static_cast<uint64_t>(time_left_ms / 4) + increment_ms);
+    // Scale optimum time down slightly in general to conserve time for the endgame
+    optimum_time = base_optimum_time * 0.9;
+    
+    // 3. Hard Time: Absolute maximum we can spend
+    // Usually a multiple of optimum time or a fraction of remaining time
+    maximum_time = std::min(static_cast<uint64_t>(safe_max), std::max(static_cast<uint64_t>(time_left_ms / 5), base_optimum_time * 5));
     
     // Fallback: Ensure maximum_time doesn't exceed safe_max
     if (maximum_time > safe_max) {
