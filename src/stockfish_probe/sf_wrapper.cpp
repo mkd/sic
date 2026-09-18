@@ -60,7 +60,17 @@ namespace StockfishWrapper {
         int sf_type = Stockfish::NORMAL;
         if (flag == 1) sf_type = Stockfish::PROMOTION;
         else if (flag == 2) sf_type = Stockfish::EN_PASSANT;
-        else if (flag == 3) sf_type = Stockfish::CASTLING;
+        else if (flag == 3) {
+            sf_type = Stockfish::CASTLING;
+            // Stockfish encodes castling as King to Rook
+            if (from == 4) { // E1
+                if (to == 6) to = 7; // G1 -> H1
+                else if (to == 2) to = 0; // C1 -> A1
+            } else if (from == 60) { // E8
+                if (to == 62) to = 63; // G8 -> H8
+                else if (to == 58) to = 56; // C8 -> A8
+            }
+        }
         
         int sf_prom = 0;
         if (sf_type == Stockfish::PROMOTION) {
@@ -70,7 +80,7 @@ namespace StockfishWrapper {
             else if (prom == 3) sf_prom = Stockfish::QUEEN - Stockfish::KNIGHT;
         }
         
-        return static_cast<Stockfish::Move>(from | (to << 6) | sf_type | (sf_prom << 12));
+        return static_cast<Stockfish::Move>((from << 6) | to | sf_type | (sf_prom << 12));
     }
 
         void do_move(uint16_t move) {

@@ -71,6 +71,7 @@ Move start_search(Position& pos, int max_depth) {
             t->max_depth = max_depth;
             t->sync_state = state_ptr;
             t->is_searching = true;
+            t->sw.node_count = 0;
         }
         t->cv.notify_one();
     }
