@@ -20,23 +20,28 @@ void init_timer(int time_left_ms, int increment_ms, int moves_to_go) {
     // 1. Calculate a safe maximum time (leave 50ms for network/GUI overhead)
     uint64_t safe_max = std::max(0, time_left_ms - 50);
 
-    // Default moves to go if sudden death
+    // Default moves to go if sudden death (Gargantua defaults to 40)
     if (moves_to_go == 0) {
         moves_to_go = 40;
     }
 
-    // 2. Soft Time: Target time we want to spend
-    // Stockfish uses time_left / mtg + increment * 0.75
-    // To prevent spending too much time early, we slightly inflate mtg or use a constant curve.
-    double mtg = moves_to_go;
-    base_optimum_time = static_cast<uint64_t>((time_left_ms / (mtg + 2)) + (increment_ms * 3 / 4));
+    // 2. Soft Time: Target time we want to spend (Mimic Gargantua)
+    // Gargantua strictly allocates time / mtg + inc.
+    uint64_t base_time = time_left_ms / moves_to_go;
+    if (base_time > 50) {
+        base_time -= 50;
+    } else {
+        base_time = 0;
+    }
+    
+    base_optimum_time = base_time + increment_ms;
     
     // Scale optimum time down slightly in general to conserve time for the endgame
-    optimum_time = base_optimum_time * 0.9;
+    optimum_time = base_optimum_time;
     
-    // 3. Hard Time: Absolute maximum we can spend
-    // Usually a multiple of optimum time or a fraction of remaining time
-    maximum_time = std::min(static_cast<uint64_t>(safe_max), std::max(static_cast<uint64_t>(time_left_ms / 5), base_optimum_time * 5));
+    // 3. Hard Time: Absolute maximum we can spend. Cap it tightly like Gargantua.
+    // Instead of time_left / 5 (20%), cap to 1.5x of the optimum time.
+    maximum_time = std::min(static_cast<uint64_t>(safe_max), static_cast<uint64_t>(base_optimum_time * 1.5));
     
     // Fallback: Ensure maximum_time doesn't exceed safe_max
     if (maximum_time > safe_max) {
@@ -71,24 +76,24 @@ void check_time_at_root() {
 }
 
 void extend_time_for_instability() {
-    // Best move changed! Extend the soft limit (up to 3.0x)
-    time_factor += 0.3;
-    if (time_factor > 3.0) time_factor = 3.0;
+    // Best move changed! Extend the soft limit slightly, but don't blow time
+    time_factor += 0.15;
+    if (time_factor > 1.5) time_factor = 1.5;
     optimum_time = std::min(maximum_time, static_cast<uint64_t>(base_optimum_time * time_factor));
 }
 
 void extend_time_for_score_drop() {
-    // Score dropped significantly. Extend time (up to 4.0x)
-    time_factor += 0.5;
-    if (time_factor > 4.0) time_factor = 4.0;
+    // Score dropped significantly. Extend time slightly.
+    time_factor += 0.25;
+    if (time_factor > 1.5) time_factor = 1.5;
     optimum_time = std::min(maximum_time, static_cast<uint64_t>(base_optimum_time * time_factor));
 }
 
 void scale_time_for_nodes(uint64_t best_move_nodes, uint64_t total_nodes) {
     if (total_nodes < 10000 || base_optimum_time == 999999999) return;
     double fraction = static_cast<double>(best_move_nodes) / static_cast<double>(total_nodes);
-    // Multiply by up to 2.5x if the best move has very few nodes (low confidence)
-    double multiplier = std::max(0.6, 2.5 - 2.0 * fraction);
+    // Multiply by up to 1.3x if the best move has very few nodes (low confidence)
+    double multiplier = std::max(0.8, 1.3 - 1.0 * fraction);
     optimum_time = std::min(maximum_time, static_cast<uint64_t>(base_optimum_time * time_factor * multiplier));
 }
 
